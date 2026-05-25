@@ -1,7 +1,12 @@
 import crypto from "node:crypto";
 
 const COOKIE_NAME = "squadslot_session";
-const secret = process.env.SESSION_SECRET || "dev-secret-change-me";
+const defaultSecret = "dev-secret-change-me";
+const secret = process.env.SESSION_SECRET || defaultSecret;
+
+if (process.env.NODE_ENV === "production" && (secret === defaultSecret || secret.length < 32)) {
+  throw new Error("SESSION_SECRET must be set to at least 32 characters in production.");
+}
 
 function base64url(input) {
   return Buffer.from(input).toString("base64url");
@@ -35,8 +40,9 @@ export function readSessionCookie(req) {
 export function setSession(res, userId) {
   res.cookie(COOKIE_NAME, createSessionCookie(userId), {
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: "strict",
     secure: process.env.NODE_ENV === "production",
+    path: "/",
     maxAge: 1000 * 60 * 60 * 24 * 30
   });
 }

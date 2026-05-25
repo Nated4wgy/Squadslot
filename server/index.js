@@ -5,18 +5,83 @@ import { fileURLToPath } from "node:url";
 import bcrypt from "bcryptjs";
 import { clearSession, readSessionCookie, setSession } from "./auth.js";
 import { cleanupDemoOnlyDatabase, db, getSetting, publicUser, setSetting } from "./db.js";
-import { postDiscordUpdate } from "./discord.js";
+import { isValidDiscordWebhookUrl, postDiscordUpdate } from "./discord.js";
 import { getSteamGameDetails, searchSteamGames } from "./steam.js";
 
-cleanupDemoOnlyDatabase();
+if (process.env.SQUADSLOT_CLEAN_DEMO_DATA === "true") {
+  cleanupDemoOnlyDatabase();
+}
 
 const app = express();
 const port = Number(process.env.PORT || 8080);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "..", "dist");
+const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const authAttempts = new Map();
 
-app.use(express.json());
+if (process.env.TRUST_PROXY === "1" || process.env.TRUST_PROXY === "true") {
+  app.set("trust proxy", 1);
+}
+
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "same-origin");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "frame-ancestors 'none'",
+      "form-action 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: https://shared.akamai.steamstatic.com https://*.steamstatic.com",
+      "connect-src 'self'"
+    ].join("; ")
+  );
+  next();
+});
+
+app.use("/api", (req, res, next) => {
+  if (unsafeMethods.has(req.method) && !req.is("application/json")) {
+    return res.status(415).json({ error: "API requests must use application/json." });
+  }
+  next();
+});
+
+app.use(express.json({ limit: "32kb" }));
 app.use(cookieParser());
+
+function requestOrigin(req) {
+  const protocol = req.get("x-forwarded-proto")?.split(",")[0]?.trim() || req.protocol;
+  return `${protocol}://${req.get("host")}`;
+}
+
+function allowedOrigins(req) {
+  return new Set([requestOrigin(req), process.env.APP_URL].filter(Boolean));
+}
+
+app.use("/api", (req, res, next) => {
+  if (!unsafeMethods.has(req.method)) return next();
+
+  const origin = req.get("origin");
+  const referer = req.get("referer");
+  let candidate = origin || "";
+  if (!candidate && referer) {
+    try {
+      candidate = new URL(referer).origin;
+    } catch {
+      return res.status(403).json({ error: "Invalid request origin." });
+    }
+  }
+
+  if (!candidate && process.env.NODE_ENV !== "production") return next();
+  if (candidate && allowedOrigins(req).has(candidate)) return next();
+
+  return res.status(403).json({ error: "Invalid request origin." });
+});
 
 app.use((req, _res, next) => {
   const userId = readSessionCookie(req);
@@ -39,6 +104,31 @@ function cleanText(value, fallback = "") {
   return String(value ?? fallback).trim();
 }
 
+function isValidHttpUrl(value) {
+  if (!value) return true;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function authRateLimit(req, res, next) {
+  const key = req.ip || req.socket.remoteAddress || "unknown";
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000;
+  const attempts = (authAttempts.get(key) || []).filter((timestamp) => now - timestamp < windowMs);
+
+  if (attempts.length >= 25) {
+    return res.status(429).json({ error: "Too many auth attempts. Try again later." });
+  }
+
+  attempts.push(now);
+  authAttempts.set(key, attempts);
+  next();
+}
+
 async function notifyDiscord(update) {
   try {
     return await postDiscordUpdate(update);
@@ -55,7 +145,7 @@ app.get("/api/setup", (_req, res) => {
   res.json({ hasUsers: userCount > 0 });
 });
 
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", authRateLimit, (req, res) => {
   const username = cleanText(req.body.username).toLowerCase();
   const displayName = cleanText(req.body.displayName, username);
   const password = String(req.body.password ?? "");
@@ -63,17 +153,20 @@ app.post("/api/auth/register", (req, res) => {
   if (!/^[a-z0-9_.-]{3,24}$/.test(username)) {
     return res.status(400).json({ error: "Username must be 3-24 characters using letters, numbers, dots, dashes, or underscores." });
   }
-  if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters." });
+  if (displayName.length < 1 || displayName.length > 60) return res.status(400).json({ error: "Display name must be 1-60 characters." });
+  if (password.length < 8 || password.length > 128) return res.status(400).json({ error: "Password must be 8-128 characters." });
 
   const passwordHash = bcrypt.hashSync(password, 12);
-  const userCount = db.prepare("SELECT COUNT(*) AS count FROM users").get().count;
-  const role = userCount === 0 ? "admin" : "user";
 
   let result;
   try {
-    result = db
-      .prepare("INSERT INTO users (username, display_name, role, password_hash) VALUES (?, ?, ?, ?)")
-      .run(username, displayName || username, role, passwordHash);
+    result = db.transaction(() => {
+      const userCount = db.prepare("SELECT COUNT(*) AS count FROM users").get().count;
+      const role = userCount === 0 ? "admin" : "user";
+      return db
+        .prepare("INSERT INTO users (username, display_name, role, password_hash) VALUES (?, ?, ?, ?)")
+        .run(username, displayName, role, passwordHash);
+    })();
   } catch (error) {
     if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
       return res.status(409).json({ error: "That username is already taken." });
@@ -86,12 +179,12 @@ app.post("/api/auth/register", (req, res) => {
   res.status(201).json({ user: publicUser(user) });
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", authRateLimit, (req, res) => {
   const username = cleanText(req.body.username).toLowerCase();
   const password = String(req.body.password ?? "");
   const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username);
 
-  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+  if (password.length > 128 || !user || !bcrypt.compareSync(password, user.password_hash)) {
     return res.status(401).json({ error: "Invalid username or password." });
   }
   setSession(res, user.id);
@@ -111,7 +204,7 @@ app.get("/api/friends", requireAuth, (req, res) => {
 });
 
 app.get("/api/games", requireAuth, async (req, res) => {
-  const query = cleanText(req.query.q, "co-op");
+  const query = cleanText(req.query.q, "co-op").slice(0, 80);
   try {
     const games = await searchSteamGames(query);
     res.json({ games, source: "steam" });
@@ -351,11 +444,21 @@ app.put("/api/admin/settings", requireAdmin, (req, res) => {
   const discordWebhookUrl = cleanText(req.body.discordWebhookUrl);
   const discordBotName = cleanText(req.body.discordBotName, "SquadSlot") || "SquadSlot";
 
+  if (!isValidHttpUrl(appUrl)) return res.status(400).json({ error: "App URL must be http or https." });
+  if (!isValidDiscordWebhookUrl(discordWebhookUrl)) return res.status(400).json({ error: "Discord webhook URL must be a Discord webhook URL." });
+  if (discordBotName.length > 80) return res.status(400).json({ error: "Discord bot name is too long." });
+
   if (appUrl) setSetting("appUrl", appUrl);
   setSetting("discordWebhookUrl", discordWebhookUrl);
   setSetting("discordBotName", discordBotName);
 
   res.json({ ok: true });
+});
+
+app.use("/api", (error, _req, res, next) => {
+  void next;
+  console.error(error);
+  res.status(500).json({ error: "Server error." });
 });
 
 if (process.env.NODE_ENV === "production") {

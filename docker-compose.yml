@@ -8,10 +8,11 @@ services:
     environment:
       PORT: 8080
       DATABASE_PATH: /data/squadslot.db
-      SESSION_SECRET: change-this-long-random-secret
-      APP_URL: https://calendar.yourdomain.com
-      DISCORD_WEBHOOK_URL: ""
-      DISCORD_BOT_NAME: SquadSlot
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in a .env file before starting SquadSlot}
+      APP_URL: ${APP_URL:-http://localhost:8080}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      DISCORD_BOT_NAME: ${DISCORD_BOT_NAME:-SquadSlot}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
     volumes:
       - squadslot-data:/data
 

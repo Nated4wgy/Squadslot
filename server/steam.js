@@ -9,8 +9,24 @@ function cached(map, key) {
 }
 
 function store(map, key, value) {
+  if (map.size > 100) {
+    map.delete(map.keys().next().value);
+  }
   map.set(key, { value, createdAt: Date.now() });
   return value;
+}
+
+async function fetchJsonWithTimeout(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
+
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Steam request failed with ${response.status}`);
+    return response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function toGameSummary(item) {
@@ -45,7 +61,7 @@ function toGameDetails(appId, payload) {
 }
 
 export async function searchSteamGames(term) {
-  const query = String(term || "").trim();
+  const query = String(term || "").trim().slice(0, 80);
   if (query.length < 2) return [];
 
   const key = query.toLowerCase();
@@ -57,10 +73,7 @@ export async function searchSteamGames(term) {
   url.searchParams.set("l", "english");
   url.searchParams.set("cc", "GB");
 
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Steam search failed with ${response.status}`);
-
-  const payload = await response.json();
+  const payload = await fetchJsonWithTimeout(url);
   const games = Array.isArray(payload.items)
     ? payload.items.filter((item) => item.type === "app").slice(0, 20).map(toGameSummary)
     : [];
@@ -80,9 +93,6 @@ export async function getSteamGameDetails(appId) {
   url.searchParams.set("l", "english");
   url.searchParams.set("cc", "GB");
 
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Steam details failed with ${response.status}`);
-
-  const payload = await response.json();
+  const payload = await fetchJsonWithTimeout(url);
   return store(detailsCache, id, toGameDetails(id, payload));
 }

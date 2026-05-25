@@ -22,6 +22,8 @@ SquadSlot is a self-hosted gaming calendar for friend groups. It helps a squad s
 Clone or copy the project onto your server, then from the project folder run:
 
 ```bash
+cp .env.example .env
+nano .env
 docker compose up --build -d
 ```
 
@@ -45,14 +47,20 @@ Open the site and create the first account. That first account becomes the admin
 
 ## Required Production Settings
 
-Before exposing the app publicly, edit `docker-compose.yml` and change:
+Before exposing the app publicly, set these values in `.env`:
 
-```yaml
-SESSION_SECRET: change-this-long-random-secret
-APP_URL: https://calendar.yourdomain.com
+```bash
+SESSION_SECRET=replace-with-a-long-random-secret-at-least-32-characters
+APP_URL=https://calendar.yourdomain.com
 ```
 
-Use a long random value for `SESSION_SECRET`.
+Use a long random value for `SESSION_SECRET`. The container will refuse to start in production if the secret is missing or too short.
+
+If SquadSlot is behind a reverse proxy such as Nginx, Caddy, Cloudflare Tunnel, or Traefik, set:
+
+```bash
+TRUST_PROXY=1
+```
 
 ## Discord Updates
 
@@ -73,11 +81,11 @@ Create a webhook in Discord:
 4. Create a webhook.
 5. Copy the webhook URL.
 
-Then either set it in `docker-compose.yml`:
+Then either set it in `.env`:
 
-```yaml
-DISCORD_WEBHOOK_URL: https://discord.com/api/webhooks/your-webhook-url
-DISCORD_BOT_NAME: SquadSlot
+```bash
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/your-webhook-url
+DISCORD_BOT_NAME=SquadSlot
 ```
 
 Or sign in as an admin and save it from the Admin page.
@@ -121,11 +129,21 @@ Useful environment variables:
 ```bash
 PORT=8080
 DATABASE_PATH=/data/squadslot.db
-SESSION_SECRET=change-this-long-random-secret
+SESSION_SECRET=replace-with-a-long-random-secret-at-least-32-characters
 APP_URL=https://calendar.yourdomain.com
 DISCORD_WEBHOOK_URL=
 DISCORD_BOT_NAME=SquadSlot
+TRUST_PROXY=1
 ```
+
+## Security Notes
+
+- `SESSION_SECRET` is required in production and must be at least 32 characters.
+- Mutating API requests require `application/json` and a same-origin `Origin` or `Referer` header in production.
+- Discord webhook URLs are validated so the server only posts to Discord webhook endpoints.
+- Auth endpoints include basic in-memory rate limiting.
+- The app sends common security headers including CSP, frame blocking, referrer policy, and content-type sniffing protection.
+- If you intentionally need to clear old seeded demo data from a development database, start once with `SQUADSLOT_CLEAN_DEMO_DATA=true`. It is off by default to avoid accidental data loss.
 
 ## Updating
 
