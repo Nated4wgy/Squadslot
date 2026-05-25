@@ -1,0 +1,368 @@
+import express from "express";
+import cookieParser from "cookie-parser";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import bcrypt from "bcryptjs";
+import { clearSession, readSessionCookie, setSession } from "./auth.js";
+import { cleanupDemoOnlyDatabase, db, getSetting, publicUser, setSetting } from "./db.js";
+import { postDiscordUpdate } from "./discord.js";
+import { getSteamGameDetails, searchSteamGames } from "./steam.js";
+
+cleanupDemoOnlyDatabase();
+
+const app = express();
+const port = Number(process.env.PORT || 8080);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const distDir = path.join(__dirname, "..", "dist");
+
+app.use(express.json());
+app.use(cookieParser());
+
+app.use((req, _res, next) => {
+  const userId = readSessionCookie(req);
+  req.user = userId ? db.prepare("SELECT * FROM users WHERE id = ?").get(userId) : null;
+  next();
+});
+
+function requireAuth(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: "You need to sign in first." });
+  next();
+}
+
+function requireAdmin(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: "You need to sign in first." });
+  if (req.user.role !== "admin") return res.status(403).json({ error: "Admin access required." });
+  next();
+}
+
+function cleanText(value, fallback = "") {
+  return String(value ?? fallback).trim();
+}
+
+async function notifyDiscord(update) {
+  try {
+    return await postDiscordUpdate(update);
+  } catch (error) {
+    console.error("Discord notification failed:", error.message);
+    return { sent: false, skipped: false, error: error.message };
+  }
+}
+
+app.get("/api/health", (_req, res) => res.json({ ok: true }));
+
+app.get("/api/setup", (_req, res) => {
+  const userCount = db.prepare("SELECT COUNT(*) AS count FROM users").get().count;
+  res.json({ hasUsers: userCount > 0 });
+});
+
+app.post("/api/auth/register", (req, res) => {
+  const username = cleanText(req.body.username).toLowerCase();
+  const displayName = cleanText(req.body.displayName, username);
+  const password = String(req.body.password ?? "");
+
+  if (!/^[a-z0-9_.-]{3,24}$/.test(username)) {
+    return res.status(400).json({ error: "Username must be 3-24 characters using letters, numbers, dots, dashes, or underscores." });
+  }
+  if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters." });
+
+  const passwordHash = bcrypt.hashSync(password, 12);
+  const userCount = db.prepare("SELECT COUNT(*) AS count FROM users").get().count;
+  const role = userCount === 0 ? "admin" : "user";
+
+  let result;
+  try {
+    result = db
+      .prepare("INSERT INTO users (username, display_name, role, password_hash) VALUES (?, ?, ?, ?)")
+      .run(username, displayName || username, role, passwordHash);
+  } catch (error) {
+    if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
+      return res.status(409).json({ error: "That username is already taken." });
+    }
+    throw error;
+  }
+
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(result.lastInsertRowid);
+  setSession(res, user.id);
+  res.status(201).json({ user: publicUser(user) });
+});
+
+app.post("/api/auth/login", (req, res) => {
+  const username = cleanText(req.body.username).toLowerCase();
+  const password = String(req.body.password ?? "");
+  const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username);
+
+  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+    return res.status(401).json({ error: "Invalid username or password." });
+  }
+  setSession(res, user.id);
+  res.json({ user: publicUser(user) });
+});
+
+app.post("/api/auth/logout", (_req, res) => {
+  clearSession(res);
+  res.json({ ok: true });
+});
+
+app.get("/api/me", (req, res) => res.json({ user: publicUser(req.user) }));
+
+app.get("/api/friends", requireAuth, (req, res) => {
+  const users = db.prepare("SELECT id, username, display_name, created_at FROM users ORDER BY display_name").all();
+  res.json({ users: users.map(publicUser).filter((user) => user.id !== req.user.id) });
+});
+
+app.get("/api/games", requireAuth, async (req, res) => {
+  const query = cleanText(req.query.q, "co-op");
+  try {
+    const games = await searchSteamGames(query);
+    res.json({ games, source: "steam" });
+  } catch (error) {
+    res.status(502).json({ error: error.message });
+  }
+});
+
+app.get("/api/games/:appId", requireAuth, async (req, res) => {
+  try {
+    const game = await getSteamGameDetails(req.params.appId);
+    if (!game) return res.status(404).json({ error: "Game not found on Steam." });
+    res.json({ game, source: "steam" });
+  } catch (error) {
+    res.status(502).json({ error: error.message });
+  }
+});
+
+app.post("/api/games/suggest", requireAuth, async (req, res) => {
+  const steamAppId = Number(req.body.steamAppId);
+  const title = cleanText(req.body.title);
+  if (!steamAppId || !title) return res.status(400).json({ error: "Steam app and title are required." });
+
+  try {
+    const discord = await notifyDiscord({
+      title: "New game suggestion",
+      description: `${req.user.display_name} suggested **${title}**.`,
+      fields: [
+        { name: "Steam", value: `https://store.steampowered.com/app/${steamAppId}/`, inline: false }
+      ],
+      color: 0xd7fb6d
+    });
+    res.status(201).json({ ok: true, discord });
+  } catch (error) {
+    res.status(502).json({ error: error.message });
+  }
+});
+
+app.get("/api/availability", requireAuth, (_req, res) => {
+  const rows = db
+    .prepare(`
+      SELECT a.id, a.user_id AS userId, u.display_name AS displayName, a.date, a.start_time AS startTime,
+             a.end_time AS endTime, a.note
+      FROM availability a
+      JOIN users u ON u.id = a.user_id
+      ORDER BY a.date, a.start_time
+    `)
+    .all();
+  res.json({ availability: rows });
+});
+
+app.post("/api/availability", requireAuth, async (req, res) => {
+  const date = cleanText(req.body.date);
+  const startTime = cleanText(req.body.startTime);
+  const endTime = cleanText(req.body.endTime);
+  const note = cleanText(req.body.note);
+  if (!date || !startTime || !endTime) return res.status(400).json({ error: "Date, start, and end time are required." });
+
+  const result = db
+    .prepare("INSERT INTO availability (user_id, date, start_time, end_time, note) VALUES (?, ?, ?, ?, ?)")
+    .run(req.user.id, date, startTime, endTime, note);
+  const discord = await notifyDiscord({
+    title: "Availability added",
+    description: `${req.user.display_name} is free on **${date}**.`,
+    fields: [
+      { name: "Time", value: `${startTime} - ${endTime}`, inline: true },
+      { name: "Note", value: note || "Free", inline: true }
+    ]
+  });
+  res.status(201).json({ id: result.lastInsertRowid, discord });
+});
+
+app.get("/api/events", requireAuth, (_req, res) => {
+  const events = db
+    .prepare(`
+      SELECT e.id, e.owner_id AS ownerId, owner.display_name AS ownerName, e.title, e.date,
+             e.start_time AS startTime, e.end_time AS endTime, e.notes,
+             e.steam_app_id AS steamAppId, COALESCE(e.game_title, g.title) AS gameTitle
+      FROM events e
+      JOIN users owner ON owner.id = e.owner_id
+      LEFT JOIN games g ON g.id = e.game_id
+      ORDER BY e.date, e.start_time
+    `)
+    .all();
+  const invites = db
+    .prepare(`
+      SELECT ei.event_id AS eventId, ei.user_id AS userId, u.display_name AS displayName, ei.status
+      FROM event_invites ei
+      JOIN users u ON u.id = ei.user_id
+    `)
+    .all();
+  res.json({
+    events: events.map((event) => ({
+      ...event,
+      invites: invites.filter((invite) => invite.eventId === event.id)
+    }))
+  });
+});
+
+app.patch("/api/events/:id/invites/me", requireAuth, (req, res) => {
+  const eventId = Number(req.params.id);
+  const status = cleanText(req.body.status);
+  if (!["accepted", "declined", "tentative"].includes(status)) {
+    return res.status(400).json({ error: "Invalid invite status." });
+  }
+
+  const invite = db
+    .prepare("SELECT event_id AS eventId FROM event_invites WHERE event_id = ? AND user_id = ?")
+    .get(eventId, req.user.id);
+  if (!invite) return res.status(404).json({ error: "Invite not found." });
+
+  db.prepare("UPDATE event_invites SET status = ? WHERE event_id = ? AND user_id = ?").run(status, eventId, req.user.id);
+  res.json({ ok: true });
+});
+
+app.delete("/api/events/:id", requireAuth, async (req, res) => {
+  const eventId = Number(req.params.id);
+  const event = db
+    .prepare(`
+      SELECT e.id, e.owner_id AS ownerId, e.title, e.date, e.start_time AS startTime,
+             e.end_time AS endTime, COALESCE(e.game_title, g.title) AS gameTitle
+      FROM events e
+      LEFT JOIN games g ON g.id = e.game_id
+      WHERE e.id = ?
+    `)
+    .get(eventId);
+  if (!event) return res.status(404).json({ error: "Event not found." });
+  if (event.ownerId !== req.user.id && req.user.role !== "admin") {
+    return res.status(403).json({ error: "Only the creator or an admin can remove this event." });
+  }
+
+  db.prepare("DELETE FROM events WHERE id = ?").run(eventId);
+  const discord = await notifyDiscord({
+    title: "Session removed",
+    description: `${req.user.display_name} removed **${event.title}**.`,
+    fields: [
+      { name: "Game", value: event.gameTitle || "TBD", inline: true },
+      { name: "When", value: `${event.date}, ${event.startTime} - ${event.endTime}`, inline: true }
+    ],
+    color: 0x7c8790
+  });
+  res.json({ ok: true, discord });
+});
+
+app.post("/api/events", requireAuth, async (req, res) => {
+  const title = cleanText(req.body.title);
+  const date = cleanText(req.body.date);
+  const startTime = cleanText(req.body.startTime);
+  const endTime = cleanText(req.body.endTime);
+  const notes = cleanText(req.body.notes);
+  const steamAppId = req.body.steamAppId ? Number(req.body.steamAppId) : null;
+  const gameTitle = cleanText(req.body.gameTitle) || null;
+  const inviteIds = Array.isArray(req.body.inviteIds) ? req.body.inviteIds.map(Number).filter(Boolean) : [];
+
+  if (!title || !date || !startTime || !endTime) return res.status(400).json({ error: "Title, date, start, and end time are required." });
+
+  const create = db.transaction(() => {
+    const result = db
+      .prepare("INSERT INTO events (owner_id, steam_app_id, game_title, title, date, start_time, end_time, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(req.user.id, steamAppId, gameTitle, title, date, startTime, endTime, notes);
+    const invite = db.prepare("INSERT OR IGNORE INTO event_invites (event_id, user_id) VALUES (?, ?)");
+    invite.run(result.lastInsertRowid, req.user.id);
+    for (const id of inviteIds) invite.run(result.lastInsertRowid, id);
+    return result.lastInsertRowid;
+  });
+
+  const eventId = create();
+  const event = db
+    .prepare(`
+      SELECT e.id, e.title, e.date, e.start_time AS startTime, e.end_time AS endTime,
+             e.steam_app_id AS steamAppId, COALESCE(e.game_title, g.title) AS gameTitle
+      FROM events e
+      LEFT JOIN games g ON g.id = e.game_id
+      WHERE e.id = ?
+    `)
+    .get(eventId);
+  const invitees = inviteIds.length
+    ? db.prepare(`SELECT display_name AS displayName FROM users WHERE id IN (${inviteIds.map(() => "?").join(",")})`).all(...inviteIds)
+    : [];
+  const discord = await notifyDiscord({
+    title: "New session invite",
+    description: `${req.user.display_name} created **${event.title}**.`,
+    fields: [
+      { name: "Game", value: event.gameTitle || "TBD", inline: true },
+      { name: "When", value: `${event.date}, ${event.startTime} - ${event.endTime}`, inline: true },
+      event.steamAppId ? { name: "Steam", value: `https://store.steampowered.com/app/${event.steamAppId}/`, inline: false } : null,
+      { name: "Invited", value: invitees.map((invitee) => invitee.displayName).join(", ") || "No extra invitees", inline: false }
+    ].filter(Boolean),
+    color: 0xff6b55
+  });
+
+  res.status(201).json({ id: eventId, discord });
+});
+
+app.get("/api/admin/users", requireAdmin, (_req, res) => {
+  const users = db
+    .prepare(`
+      SELECT u.id, u.username, u.display_name AS displayName, u.role, u.created_at AS createdAt,
+             COUNT(DISTINCT a.id) AS availabilityCount,
+             COUNT(DISTINCT e.id) AS eventCount
+      FROM users u
+      LEFT JOIN availability a ON a.user_id = u.id
+      LEFT JOIN events e ON e.owner_id = u.id
+      GROUP BY u.id
+      ORDER BY u.created_at
+    `)
+    .all();
+  res.json({ users });
+});
+
+app.patch("/api/admin/users/:id", requireAdmin, (req, res) => {
+  const userId = Number(req.params.id);
+  const role = cleanText(req.body.role);
+  if (!["admin", "user"].includes(role)) return res.status(400).json({ error: "Invalid role." });
+
+  const adminCount = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'").get().count;
+  if (req.user.id === userId && role !== "admin" && adminCount <= 1) {
+    return res.status(400).json({ error: "You cannot remove the last admin." });
+  }
+
+  db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, userId);
+  res.json({ ok: true });
+});
+
+app.get("/api/admin/settings", requireAdmin, (_req, res) => {
+  res.json({
+    settings: {
+      appUrl: getSetting("appUrl", process.env.APP_URL || "http://localhost:8080"),
+      discordWebhookUrl: getSetting("discordWebhookUrl", process.env.DISCORD_WEBHOOK_URL || ""),
+      discordBotName: getSetting("discordBotName", process.env.DISCORD_BOT_NAME || "SquadSlot")
+    }
+  });
+});
+
+app.put("/api/admin/settings", requireAdmin, (req, res) => {
+  const appUrl = cleanText(req.body.appUrl);
+  const discordWebhookUrl = cleanText(req.body.discordWebhookUrl);
+  const discordBotName = cleanText(req.body.discordBotName, "SquadSlot") || "SquadSlot";
+
+  if (appUrl) setSetting("appUrl", appUrl);
+  setSetting("discordWebhookUrl", discordWebhookUrl);
+  setSetting("discordBotName", discordBotName);
+
+  res.json({ ok: true });
+});
+
+if (process.env.NODE_ENV === "production") {
+  app.use(express.static(distDir));
+  app.get("*", (_req, res) => res.sendFile(path.join(distDir, "index.html")));
+}
+
+app.listen(port, () => {
+  console.log(`SquadSlot listening on port ${port}`);
+});

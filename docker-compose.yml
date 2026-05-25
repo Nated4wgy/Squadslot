@@ -1,0 +1,19 @@
+services:
+  squadslot:
+    build: .
+    container_name: squadslot
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: 8080
+      DATABASE_PATH: /data/squadslot.db
+      SESSION_SECRET: change-this-long-random-secret
+      APP_URL: https://calendar.yourdomain.com
+      DISCORD_WEBHOOK_URL: ""
+      DISCORD_BOT_NAME: SquadSlot
+    volumes:
+      - squadslot-data:/data
+
+volumes:
+  squadslot-data:
