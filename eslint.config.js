@@ -15,6 +15,7 @@ export default [
       sourceType: "module",
       parserOptions: { ecmaFeatures: { jsx: true } },
       globals: {
+        URL: "readonly",
         document: "readonly",
         fetch: "readonly",
         React: "readonly",

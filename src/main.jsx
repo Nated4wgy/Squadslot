@@ -37,8 +37,11 @@ function addDays(date, amount) {
   return copy;
 }
 
-function isoDate(date) {
-  return date.toISOString().slice(0, 10);
+function localDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function formatDay(date) {
@@ -128,6 +131,7 @@ function Sidebar({ user, activeView, setActiveView, onLogout }) {
   const nav = [
     ["calendar", "Calendar", CalendarDays],
     ["events", "Events", Clock],
+    ["free-time", "Free Time", Check],
     ["friends", "Friends", UsersRound],
     ["games", "Games", Gamepad2],
     ...(user.role === "admin" ? [["admin", "Admin", Shield]] : [])
@@ -181,7 +185,31 @@ function EventPopover({ event }) {
   );
 }
 
+function AvailabilityPopover({ freeItems }) {
+  return (
+    <div className="availability-popover" role="tooltip">
+      <strong>Free players</strong>
+      {freeItems.map((item) => (
+        <div key={item.id}>
+          <span>{item.displayName}</span>
+          <small>{item.startTime} to {item.endTime}{item.note ? ` - ${item.note}` : ""}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CalendarGrid({ days, availability, events }) {
+  function committedInviteUserIds(dayEvents) {
+    return new Set(
+      dayEvents.flatMap((event) =>
+        event.invites
+          .filter((invite) => ["accepted", "tentative"].includes(invite.status))
+          .map((invite) => invite.userId)
+      )
+    );
+  }
+
   return (
     <section className="calendar-panel">
       <div className="section-title">
@@ -193,29 +221,38 @@ function CalendarGrid({ days, availability, events }) {
       </div>
       <div className="calendar-grid">
         <div className="time-col" />
-        {days.map((day) => <div className="day-head" key={day.toISOString()}>{formatDay(day)}</div>)}
+        {days.map((day) => <div className="day-head" key={localDate(day)}>{formatDay(day)}</div>)}
         {hours.map((hour) => (
           <React.Fragment key={hour}>
             <div className="time-cell">{hour}</div>
             {days.map((day) => {
-              const date = isoDate(day);
+              const date = localDate(day);
               const dayAvailability = availability.filter((item) => item.date === date && item.startTime <= hour && item.endTime > hour);
               const dayEvents = events.filter((item) => item.date === date && item.startTime <= hour && item.endTime > hour);
+              const committedUsers = committedInviteUserIds(dayEvents);
+              const freeItems = dayAvailability.filter((item) => !committedUsers.has(item.userId));
+              const freeNames = [...new Set(freeItems.map((item) => item.displayName))];
               return (
                 <div className="slot" key={`${date}-${hour}`}>
-                  {dayAvailability.slice(0, 2).map((item) => (
-                    <div className="availability-block" key={`a-${item.id}`}>
-                      <strong>{item.displayName}</strong>
-                      <span>{item.note || "Free"}</span>
+                  {freeNames.length > 0 && (
+                    <div className="availability-block availability-group availability-with-popover" tabIndex={0}>
+                      <strong>{freeNames.length} free</strong>
+                      <span>{freeNames.slice(0, 3).join(", ")}{freeNames.length > 3 ? ` +${freeNames.length - 3}` : ""}</span>
+                      <AvailabilityPopover freeItems={freeItems} />
                     </div>
-                  ))}
-                  {dayEvents.slice(0, 1).map((item) => (
+                  )}
+                  {dayEvents.slice(0, 2).map((item) => {
+                    const accepted = item.invites.filter((invite) => invite.status === "accepted");
+                    const tentative = item.invites.filter((invite) => invite.status === "tentative");
+                    return (
                     <div className="event-block event-with-popover" key={`e-${item.id}`} tabIndex={0}>
                       <strong>{item.title}</strong>
                       <span>{item.gameTitle || "Game TBD"}</span>
+                      <small>{accepted.length} accepted{tentative.length ? `, ${tentative.length} tentative` : ""}</small>
                       <EventPopover event={item} />
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               );
             })}
@@ -289,6 +326,61 @@ function AvailabilityForm({ selectedDate, onCreated }) {
       <input placeholder="Note" value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} />
       <button className="secondary-button" type="submit"><Check size={16} /> Save</button>
     </form>
+  );
+}
+
+function FreeTimeView({ user, availability, refresh }) {
+  const [selectedDate, setSelectedDate] = useState(localDate(new Date()));
+  const visibleAvailability = availability
+    .filter((item) => user.role === "admin" || item.userId === user.id)
+    .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
+
+  async function removeAvailability(id) {
+    await api(`/api/availability/${id}`, { method: "DELETE" });
+    refresh();
+  }
+
+  return (
+    <>
+      <header className="topbar">
+        <div>
+          <h1>Free Time</h1>
+          <p>Manage availability entries without leaving the main calendar quick-add in place.</p>
+        </div>
+      </header>
+      <div className="free-time-layout">
+        <AvailabilityForm selectedDate={selectedDate} onCreated={refresh} />
+        <section className="table-panel">
+          <div className="section-title compact-title">
+            <div>
+              <h2>{user.role === "admin" ? "All availability" : "My availability"}</h2>
+              <p>Delete entries that are no longer accurate.</p>
+            </div>
+            <input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
+          </div>
+          {visibleAvailability.length === 0 && <p className="muted">No free time logged yet.</p>}
+          <div className="free-time-list">
+            {visibleAvailability.map((item) => {
+              const canDelete = item.userId === user.id || user.role === "admin";
+              return (
+                <article className="free-time-row" key={item.id}>
+                  <div>
+                    <strong>{item.displayName}</strong>
+                    <span>{item.date}, {item.startTime} to {item.endTime}</span>
+                    {item.note && <small>{item.note}</small>}
+                  </div>
+                  {canDelete && (
+                    <button className="danger-button" onClick={() => removeAvailability(item.id)} aria-label={`Delete free time for ${item.displayName}`}>
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+    </>
   );
 }
 
@@ -382,10 +474,10 @@ function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, searchGa
       <div className="content-layout">
         <div className="main-stack">
           <CalendarGrid days={days} availability={data.availability} events={data.events} />
-          <AvailabilityForm selectedDate={isoDate(days[0])} onCreated={refresh} />
+          <AvailabilityForm selectedDate={localDate(days[0])} onCreated={refresh} />
+          <EventForm games={data.games} friends={data.friends} selectedDate={localDate(days[0])} onSearchGames={searchGames} onCreated={refresh} />
         </div>
         <div className="side-stack">
-          <EventForm games={data.games} friends={data.friends} selectedDate={isoDate(days[0])} onSearchGames={searchGames} onCreated={refresh} />
           <GameRail games={data.games} onSearchGames={searchGames} />
           <EventList user={user} events={data.events} refresh={refresh} />
         </div>
@@ -614,6 +706,7 @@ function AdminView({ user }) {
   const [users, setUsers] = useState([]);
   const [settings, setSettings] = useState({ appUrl: "", discordWebhookUrl: "", discordBotName: "SquadSlot" });
   const [message, setMessage] = useState("");
+  const [backupMessage, setBackupMessage] = useState("");
 
   async function load() {
     const [usersPayload, settingsPayload] = await Promise.all([api("/api/admin/users"), api("/api/admin/settings")]);
@@ -632,6 +725,40 @@ function AdminView({ user }) {
   async function setRole(id, role) {
     await api(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify({ role }) });
     load();
+  }
+
+  async function exportBackup() {
+    setBackupMessage("");
+    const response = await fetch("/api/admin/backup");
+    if (!response.ok) throw new Error("Backup export failed.");
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `squadslot-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setBackupMessage("Backup exported.");
+  }
+
+  async function restoreBackup(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setBackupMessage("");
+    try {
+      const parsed = JSON.parse(await file.text());
+      await api("/api/admin/backup/restore", { method: "POST", body: JSON.stringify(parsed) });
+      setBackupMessage("Backup restored. Refresh or sign in again if your current session changed.");
+      await load();
+    } catch (error) {
+      setBackupMessage(error.message);
+    } finally {
+      event.target.value = "";
+    }
   }
 
   return (
@@ -676,6 +803,16 @@ function AdminView({ user }) {
           <button className="primary-button"><Settings size={16} /> Save settings</button>
           {message && <p className="muted">{message}</p>}
         </form>
+        <section className="table-panel admin-form">
+          <h2>Backup and restore</h2>
+          <p className="muted">Exports include users, bcrypt password hashes, availability, events, invites, settings, and Discord webhook configuration.</p>
+          <button className="secondary-button" type="button" onClick={exportBackup}>Export backup</button>
+          <label>
+            Restore backup JSON
+            <input type="file" accept="application/json,.json" onChange={restoreBackup} />
+          </label>
+          {backupMessage && <p className="muted">{backupMessage}</p>}
+        </section>
       </div>
     </>
   );
@@ -746,6 +883,7 @@ function App() {
         {activeView === "calendar" && <CalendarView user={user} data={data} weekOffset={weekOffset} setWeekOffset={setWeekOffset} refresh={refresh} searchGames={searchGames} />}
         {activeView === "events" && <EventsView user={user} events={data.events} refresh={refresh} />}
         {activeView === "invites" && <InvitesView user={user} events={data.events} refresh={refresh} />}
+        {activeView === "free-time" && <FreeTimeView user={user} availability={data.availability} refresh={refresh} />}
         {activeView === "friends" && <FriendsView friends={data.friends} availability={data.availability} events={data.events} />}
         {activeView === "games" && <GamesView games={data.games} searchGames={searchGames} />}
         {activeView === "admin" && user.role === "admin" && <AdminView user={user} />}

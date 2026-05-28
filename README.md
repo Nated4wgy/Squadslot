@@ -14,6 +14,7 @@ SquadSlot is a self-hosted gaming calendar for friend groups. It helps a squad s
 - Events page for created, accepted, and tentative sessions
 - Admin-only account role management
 - Admin-managed Discord webhook settings
+- Admin JSON backup and restore
 - Optional Discord channel updates
 - Single Docker container with SQLite persistence
 
@@ -155,6 +156,22 @@ docker compose up --build -d
 ```
 
 The Docker volume keeps the SQLite database between rebuilds.
+
+## Backups
+
+Admins can export and restore backup JSON files from the Admin page.
+
+The backup includes:
+
+- accounts
+- bcrypt password hashes, not plaintext passwords
+- availability/free-time entries
+- events
+- invite responses
+- app settings
+- Discord webhook configuration
+
+Because password hashes are included, restored users can keep signing in with their existing passwords. Store backup files privately, especially if they contain a Discord webhook URL.
 
 ## Notes
 

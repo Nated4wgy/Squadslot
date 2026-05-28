@@ -45,13 +45,14 @@ app.use((_req, res, next) => {
 });
 
 app.use("/api", (req, res, next) => {
-  if (unsafeMethods.has(req.method) && !req.is("application/json")) {
+  const hasBody = req.get("content-length") || req.get("transfer-encoding");
+  if (unsafeMethods.has(req.method) && hasBody && !req.is("application/json")) {
     return res.status(415).json({ error: "API requests must use application/json." });
   }
   next();
 });
 
-app.use(express.json({ limit: "32kb" }));
+app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 
 function requestOrigin(req) {
@@ -104,6 +105,14 @@ function cleanText(value, fallback = "") {
   return String(value ?? fallback).trim();
 }
 
+function isDateString(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function isTimeString(value) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
 function isValidHttpUrl(value) {
   if (!value) return true;
   try {
@@ -127,6 +136,136 @@ function authRateLimit(req, res, next) {
   attempts.push(now);
   authAttempts.set(key, attempts);
   next();
+}
+
+function isPositiveInteger(value) {
+  return Number.isInteger(Number(value)) && Number(value) > 0;
+}
+
+function assertArray(value, name) {
+  if (!Array.isArray(value)) throw new Error(`Backup ${name} must be an array.`);
+  return value;
+}
+
+function backupTables() {
+  return {
+    users: db
+      .prepare("SELECT id, username, display_name AS displayName, role, password_hash AS passwordHash, created_at AS createdAt FROM users ORDER BY id")
+      .all(),
+    availability: db
+      .prepare("SELECT id, user_id AS userId, date, start_time AS startTime, end_time AS endTime, note, created_at AS createdAt FROM availability ORDER BY id")
+      .all(),
+    games: db
+      .prepare("SELECT id, title, genre, max_players AS maxPlayers, suggested_by AS suggestedBy, created_at AS createdAt FROM games ORDER BY id")
+      .all(),
+    events: db
+      .prepare(`
+        SELECT id, owner_id AS ownerId, game_id AS gameId, steam_app_id AS steamAppId, game_title AS gameTitle,
+               title, date, start_time AS startTime, end_time AS endTime, notes, created_at AS createdAt
+        FROM events
+        ORDER BY id
+      `)
+      .all(),
+    eventInvites: db
+      .prepare("SELECT event_id AS eventId, user_id AS userId, status FROM event_invites ORDER BY event_id, user_id")
+      .all(),
+    settings: db.prepare("SELECT key, value FROM app_settings ORDER BY key").all()
+  };
+}
+
+function validateBackup(payload) {
+  if (!payload || typeof payload !== "object") throw new Error("Backup must be a JSON object.");
+  if (payload.app !== "SquadSlot") throw new Error("Backup is not a SquadSlot backup.");
+  if (payload.version !== 1) throw new Error("Unsupported backup version.");
+
+  const tables = payload.tables;
+  if (!tables || typeof tables !== "object") throw new Error("Backup is missing tables.");
+
+  const users = assertArray(tables.users, "users");
+  assertArray(tables.availability, "availability");
+  assertArray(tables.games, "games");
+  assertArray(tables.events, "events");
+  assertArray(tables.eventInvites, "eventInvites");
+  assertArray(tables.settings, "settings");
+
+  if (users.length === 0) throw new Error("Backup must contain at least one user.");
+  if (!users.some((user) => user.role === "admin")) throw new Error("Backup must contain at least one admin user.");
+
+  for (const user of users) {
+    if (!isPositiveInteger(user.id)) throw new Error("Backup contains an invalid user id.");
+    if (!/^[a-z0-9_.-]{3,24}$/.test(String(user.username || ""))) throw new Error("Backup contains an invalid username.");
+    if (!["admin", "user"].includes(user.role)) throw new Error("Backup contains an invalid user role.");
+    if (!user.passwordHash || typeof user.passwordHash !== "string") throw new Error("Backup contains an invalid password hash.");
+  }
+
+  return tables;
+}
+
+function restoreBackupTables(tables) {
+  const restore = db.transaction(() => {
+    db.prepare("DELETE FROM event_invites").run();
+    db.prepare("DELETE FROM events").run();
+    db.prepare("DELETE FROM availability").run();
+    db.prepare("DELETE FROM games").run();
+    db.prepare("DELETE FROM app_settings").run();
+    db.prepare("DELETE FROM users").run();
+
+    const insertUser = db.prepare(`
+      INSERT INTO users (id, username, display_name, role, password_hash, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    for (const user of tables.users) {
+      insertUser.run(user.id, user.username, user.displayName || user.username, user.role, user.passwordHash, user.createdAt);
+    }
+
+    const insertGame = db.prepare(`
+      INSERT INTO games (id, title, genre, max_players, suggested_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    for (const game of tables.games) {
+      insertGame.run(game.id, game.title, game.genre || "Co-op", game.maxPlayers || 4, game.suggestedBy || null, game.createdAt);
+    }
+
+    const insertAvailability = db.prepare(`
+      INSERT INTO availability (id, user_id, date, start_time, end_time, note, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const item of tables.availability) {
+      insertAvailability.run(item.id, item.userId, item.date, item.startTime, item.endTime, item.note || "", item.createdAt);
+    }
+
+    const insertEvent = db.prepare(`
+      INSERT INTO events (id, owner_id, game_id, steam_app_id, game_title, title, date, start_time, end_time, notes, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const event of tables.events) {
+      insertEvent.run(
+        event.id,
+        event.ownerId,
+        event.gameId || null,
+        event.steamAppId || null,
+        event.gameTitle || null,
+        event.title,
+        event.date,
+        event.startTime,
+        event.endTime,
+        event.notes || "",
+        event.createdAt
+      );
+    }
+
+    const insertInvite = db.prepare("INSERT INTO event_invites (event_id, user_id, status) VALUES (?, ?, ?)");
+    for (const invite of tables.eventInvites) {
+      insertInvite.run(invite.eventId, invite.userId, invite.status || "invited");
+    }
+
+    const insertSetting = db.prepare("INSERT INTO app_settings (key, value) VALUES (?, ?)");
+    for (const setting of tables.settings) {
+      insertSetting.run(setting.key, setting.value);
+    }
+  });
+
+  restore();
 }
 
 async function notifyDiscord(update) {
@@ -262,6 +401,8 @@ app.post("/api/availability", requireAuth, async (req, res) => {
   const endTime = cleanText(req.body.endTime);
   const note = cleanText(req.body.note);
   if (!date || !startTime || !endTime) return res.status(400).json({ error: "Date, start, and end time are required." });
+  if (!isDateString(date) || !isTimeString(startTime) || !isTimeString(endTime)) return res.status(400).json({ error: "Invalid date or time." });
+  if (startTime >= endTime) return res.status(400).json({ error: "End time must be after start time." });
 
   const result = db
     .prepare("INSERT INTO availability (user_id, date, start_time, end_time, note) VALUES (?, ?, ?, ?, ?)")
@@ -275,6 +416,35 @@ app.post("/api/availability", requireAuth, async (req, res) => {
     ]
   });
   res.status(201).json({ id: result.lastInsertRowid, discord });
+});
+
+app.delete("/api/availability/:id", requireAuth, async (req, res) => {
+  const availabilityId = Number(req.params.id);
+  const row = db
+    .prepare(`
+      SELECT a.id, a.user_id AS userId, u.display_name AS displayName, a.date,
+             a.start_time AS startTime, a.end_time AS endTime
+      FROM availability a
+      JOIN users u ON u.id = a.user_id
+      WHERE a.id = ?
+    `)
+    .get(availabilityId);
+  if (!row) return res.status(404).json({ error: "Free time entry not found." });
+  if (row.userId !== req.user.id && req.user.role !== "admin") {
+    return res.status(403).json({ error: "Only the owner or an admin can delete this free time entry." });
+  }
+
+  db.prepare("DELETE FROM availability WHERE id = ?").run(availabilityId);
+  const discord = await notifyDiscord({
+    title: "Availability removed",
+    description: `${req.user.display_name} removed a free time entry.`,
+    fields: [
+      { name: "Player", value: row.displayName, inline: true },
+      { name: "When", value: `${row.date}, ${row.startTime} - ${row.endTime}`, inline: true }
+    ],
+    color: 0x7c8790
+  });
+  res.json({ ok: true, discord });
 });
 
 app.get("/api/events", requireAuth, (_req, res) => {
@@ -453,6 +623,31 @@ app.put("/api/admin/settings", requireAdmin, (req, res) => {
   setSetting("discordBotName", discordBotName);
 
   res.json({ ok: true });
+});
+
+app.get("/api/admin/backup", requireAdmin, (_req, res) => {
+  const exportedAt = new Date().toISOString();
+  const backup = {
+    app: "SquadSlot",
+    version: 1,
+    exportedAt,
+    note: "Password values are bcrypt hashes, not plaintext passwords.",
+    tables: backupTables()
+  };
+
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Content-Disposition", `attachment; filename="squadslot-backup-${exportedAt.slice(0, 10)}.json"`);
+  res.json(backup);
+});
+
+app.post("/api/admin/backup/restore", requireAdmin, (req, res) => {
+  try {
+    const tables = validateBackup(req.body);
+    restoreBackupTables(tables);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
 app.use("/api", (error, _req, res, next) => {
