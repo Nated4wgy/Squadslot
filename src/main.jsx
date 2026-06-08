@@ -16,6 +16,7 @@ import {
   Bell,
   MessageSquare,
   Moon,
+  MousePointer2,
   Plus,
   Repeat,
   Search,
@@ -99,6 +100,16 @@ function Skeleton({ rows = 3 }) {
       {Array.from({ length: rows }, (_, index) => <span className="skeleton-row" key={index} />)}
     </div>
   );
+}
+
+function SteamImage({ src, alt = "", className = "" }) {
+  const [failedSrc, setFailedSrc] = useState("");
+
+  if (!src || failedSrc === src) {
+    return <span className={`image-fallback ${className}`.trim()}><Gamepad2 size={18} /></span>;
+  }
+
+  return <img className={className} src={src} alt={alt} onError={() => setFailedSrc(src)} />;
 }
 
 function useDebouncedSteamSearch(query, onSearchGames) {
@@ -272,10 +283,17 @@ function CalendarGrid({ user, days, availability, events, bestSlots, onAvailabil
 
   function finishAvailabilityDrag() {
     if (!dragSelection) return;
+    const firstDayIndex = Math.min(dragSelection.startDayIndex, dragSelection.endDayIndex);
+    const lastDayIndex = Math.max(dragSelection.startDayIndex, dragSelection.endDayIndex);
+    const selectedDays = days.slice(firstDayIndex, lastDayIndex + 1);
     const startHour = Math.min(dragSelection.startHour, dragSelection.endHour);
     const endHour = Math.max(dragSelection.startHour, dragSelection.endHour);
     onAvailabilityDraft({
-      date: dragSelection.date,
+      mode: selectedDays.length > 1 ? "weekly" : "once",
+      date: localDate(selectedDays[0]),
+      dates: selectedDays.map(localDate),
+      weekdays: [...new Set(selectedDays.map((day) => day.getDay()))],
+      startDate: localDate(selectedDays[0]),
       startTime: `${String(startHour).padStart(2, "0")}:00`,
       endTime: endHour >= 23 ? "23:59" : `${String(endHour + 1).padStart(2, "0")}:00`
     });
@@ -300,7 +318,10 @@ function CalendarGrid({ user, days, availability, events, bestSlots, onAvailabil
           <h2>Shared calendar</h2>
           <p>Availability and invites for this week.</p>
         </div>
-        <span className="live-chip"><Sparkles size={15} /> Tonight</span>
+        <div className="calendar-title-actions">
+          <span className="calendar-drag-hint"><MousePointer2 size={15} /> Drag to add</span>
+          <span className="live-chip"><Sparkles size={15} /> Tonight</span>
+        </div>
       </div>
       <div className="calendar-grid">
         <div className="time-col" />
@@ -308,30 +329,48 @@ function CalendarGrid({ user, days, availability, events, bestSlots, onAvailabil
         {hours.map((hour) => (
           <React.Fragment key={hour}>
             <div className="time-cell">{hour}</div>
-            {days.map((day) => {
+            {days.map((day, dayIndex) => {
               const date = localDate(day);
               const dayAvailability = availability.filter((item) => item.date === date && item.startTime <= hour && item.endTime > hour);
               const dayEvents = events.filter((item) => item.date === date && item.startTime <= hour && item.endTime > hour);
               const committedUsers = committedInviteUserIds(dayEvents);
-              const freeItems = dayAvailability.filter((item) => !committedUsers.has(item.userId));
+              const freeItems = [...new Map(
+                dayAvailability
+                  .filter((item) => !committedUsers.has(item.userId))
+                  .map((item) => [item.userId, item])
+              ).values()];
               const freeNames = [...new Set(freeItems.map((item) => item.displayName))];
               const slotKey = `${date}-${hour}`;
               const overlap = freeNames.length / maxOverlap;
               const hourNumber = Number(hour.slice(0, 2));
-              const selected = dragSelection?.date === date
+              const selected = dragSelection
+                && dayIndex >= Math.min(dragSelection.startDayIndex, dragSelection.endDayIndex)
+                && dayIndex <= Math.max(dragSelection.startDayIndex, dragSelection.endDayIndex)
                 && hourNumber >= Math.min(dragSelection.startHour, dragSelection.endHour)
                 && hourNumber <= Math.max(dragSelection.startHour, dragSelection.endHour);
               return (
                 <div
-                  className={`slot${bestKeys.has(slotKey) ? " best-slot" : ""}${selected ? " selecting-slot" : ""}`}
+                  className={`slot selectable-slot${bestKeys.has(slotKey) ? " best-slot" : ""}${selected ? " selecting-slot" : ""}`}
                   key={slotKey}
+                  data-calendar-slot
+                  data-date={date}
+                  data-hour={hour}
+                  title={`Drag from here to add availability on ${formatDay(day)} at ${hour}`}
                   style={{ "--overlap-strength": `${Math.round(overlap * 18)}%` }}
                   onMouseDown={(event) => {
-                    if (event.button !== 0 || event.target.closest(".event-block")) return;
-                    setDragSelection({ date, startHour: hourNumber, endHour: hourNumber });
+                    if (event.button !== 0 || event.target.closest(".event-block, .availability-block")) return;
+                    event.preventDefault();
+                    setDragSelection({
+                      startDayIndex: dayIndex,
+                      endDayIndex: dayIndex,
+                      startHour: hourNumber,
+                      endHour: hourNumber
+                    });
                   }}
                   onMouseEnter={() => {
-                    if (dragSelection?.date === date) setDragSelection({ ...dragSelection, endHour: hourNumber });
+                    setDragSelection((current) => current
+                      ? { ...current, endDayIndex: dayIndex, endHour: hourNumber }
+                      : current);
                   }}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => {
@@ -421,63 +460,184 @@ function EventList({ user, events, refresh }) {
   );
 }
 
-function AvailabilityForm({ selectedDate, onCreated, compact = false, draft }) {
-  const [form, setForm] = useState({ date: selectedDate, startTime: "19:00", endTime: "22:00", note: "" });
-  const [presets, setPresets] = useState([]);
+const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const weekdayOrder = [1, 2, 3, 4, 5, 6, 0];
 
-  useEffect(() => setForm((current) => ({ ...current, date: selectedDate })), [selectedDate]);
+function AvailabilityForm({ selectedDate, onCreated, compact = false, draft, onManage }) {
+  const [form, setForm] = useState({
+    mode: "once",
+    date: selectedDate,
+    weekdays: [new Date(`${selectedDate}T12:00:00`).getDay()],
+    startDate: selectedDate,
+    endDate: "",
+    startTime: "19:00",
+    endTime: "22:00",
+    note: ""
+  });
+  const [presets, setPresets] = useState([]);
+  const [status, setStatus] = useState("");
+
+  useEffect(() => setForm((current) => (
+    current.mode === "once" ? { ...current, date: selectedDate } : current
+  )), [selectedDate]);
   useEffect(() => {
     api("/api/availability/presets").then((payload) => setPresets(payload.presets)).catch(() => {});
   }, []);
   useEffect(() => {
-    if (draft) setForm((current) => ({ ...current, ...draft }));
+    if (!draft) return;
+    setForm((current) => ({
+      ...current,
+      ...draft,
+      weekdays: draft.weekdays?.length ? draft.weekdays : current.weekdays
+    }));
+    setStatus(draft.dates?.length > 1
+      ? `${draft.dates.length} days selected. Saving will repeat these weekdays.`
+      : "Calendar time selected.");
   }, [draft]);
 
   async function submit(event) {
     event.preventDefault();
-    await api("/api/availability", { method: "POST", body: JSON.stringify(form) });
-    setForm({ ...form, note: "" });
-    onCreated();
+    setStatus("");
+    try {
+      if (form.mode === "weekly") {
+        await api("/api/availability/recurring", {
+          method: "POST",
+          body: JSON.stringify({
+            weekdays: form.weekdays,
+            startTime: form.startTime,
+            endTime: form.endTime,
+            note: form.note,
+            startDate: form.startDate,
+            endDate: form.endDate
+          })
+        });
+        setStatus(`Weekly availability saved for ${form.weekdays.length} day${form.weekdays.length === 1 ? "" : "s"}.`);
+      } else {
+        await api("/api/availability", { method: "POST", body: JSON.stringify(form) });
+        setStatus("Free time saved.");
+      }
+      setForm((current) => ({ ...current, note: "" }));
+      onCreated();
+    } catch (error) {
+      setStatus(error.message);
+    }
   }
 
   function applyPreset(preset) {
     setForm((current) => ({
       ...current,
+      mode: preset.mode || "once",
       date: preset.date || (preset.weekday === null || preset.weekday === undefined ? current.date : nextWeekday(preset.weekday)),
+      weekdays: preset.weekdays || (preset.weekday === null || preset.weekday === undefined ? current.weekdays : [preset.weekday]),
+      startDate: preset.startDate || localDate(new Date()),
+      endDate: preset.endDate || "",
       startTime: preset.startTime,
       endTime: preset.endTime,
       note: preset.note || ""
     }));
+    setStatus("");
+  }
+
+  function applyQuickPreset(value) {
+    const today = new Date();
+    const tomorrow = addDays(today, 1);
+    const builtIns = {
+      tonight: { mode: "once", date: localDate(today), startTime: "19:00", endTime: "23:00", note: "Tonight" },
+      tomorrow: { mode: "once", date: localDate(tomorrow), startTime: "19:00", endTime: "22:00", note: "Tomorrow evening" },
+      weeknights: { mode: "weekly", weekdays: [1, 2, 3, 4, 5], startTime: "19:00", endTime: "22:00", note: "Weeknight" },
+      friday: { mode: "weekly", weekdays: [5], startTime: "19:00", endTime: "23:00", note: "Friday night" },
+      saturday: { mode: "weekly", weekdays: [6], startTime: "19:00", endTime: "23:00", note: "Saturday night" },
+      weekend: { mode: "weekly", weekdays: [6, 0], startTime: "19:00", endTime: "23:00", note: "Weekend evening" }
+    };
+    if (builtIns[value]) {
+      applyPreset({ ...builtIns[value], startDate: localDate(today) });
+      return;
+    }
+    const savedPreset = presets.find((item) => `saved-${item.id}` === value);
+    if (savedPreset) applyPreset(savedPreset);
+  }
+
+  function toggleWeekday(weekday) {
+    setForm((current) => {
+      const exists = current.weekdays.includes(weekday);
+      if (exists && current.weekdays.length === 1) return current;
+      return {
+        ...current,
+        weekdays: exists
+          ? current.weekdays.filter((item) => item !== weekday)
+          : [...current.weekdays, weekday]
+      };
+    });
   }
 
   return (
-    <form className={`utility-form${compact ? " utility-form-compact" : ""}`} onSubmit={submit}>
-      <h3>Log free time</h3>
-      {!compact && (
-        <div className="preset-strip">
-          <button type="button" onClick={() => applyPreset({ date: localDate(new Date()), startTime: "19:00", endTime: "23:00", note: "Tonight" })}>Tonight</button>
-          <button type="button" onClick={() => applyPreset({ weekday: 5, startTime: "19:00", endTime: "23:00", note: "Friday evening" })}>Friday evening</button>
-          {presets.map((preset) => <button type="button" onClick={() => applyPreset(preset)} key={preset.id}>{preset.name}</button>)}
+    <form className={`utility-form availability-composer availability-mode-${form.mode}${compact ? " utility-form-compact" : ""}`} onSubmit={submit}>
+      <div className="availability-form-head">
+        <h3>Log free time</h3>
+        <div className="availability-form-actions">
+          <div className="segmented-control" aria-label="Availability type">
+            <button type="button" className={form.mode === "once" ? "active" : ""} onClick={() => setForm({ ...form, mode: "once" })}>Once</button>
+            <button type="button" className={form.mode === "weekly" ? "active" : ""} onClick={() => setForm({ ...form, mode: "weekly" })}><Repeat size={14} /> Weekly</button>
+          </div>
+          {onManage && <button type="button" className="manage-availability-button" onClick={onManage}><Settings size={15} /> Advanced</button>}
         </div>
+      </div>
+      <label className="quick-preset-field">
+        <span>Quick preset</span>
+        <select value="" onChange={(event) => applyQuickPreset(event.target.value)}>
+          <option value="">Choose a preset...</option>
+          <option value="tonight">Tonight</option>
+          <option value="tomorrow">Tomorrow evening</option>
+          <option value="weeknights">Every weeknight</option>
+          <option value="friday">Every Friday night</option>
+          <option value="saturday">Every Saturday night</option>
+          <option value="weekend">Every weekend evening</option>
+          {presets.map((preset) => <option value={`saved-${preset.id}`} key={preset.id}>{preset.name}</option>)}
+        </select>
+      </label>
+      {form.mode === "once" ? (
+        <label className="availability-date-field">
+          <span>Date</span>
+          <input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} />
+        </label>
+      ) : (
+        <>
+          <div className="weekday-picker" aria-label="Repeat on weekdays">
+            {weekdayOrder.map((weekday) => (
+              <button
+                type="button"
+                className={form.weekdays.includes(weekday) ? "active" : ""}
+                onClick={() => toggleWeekday(weekday)}
+                key={weekday}
+                aria-pressed={form.weekdays.includes(weekday)}
+                title={weekdays[weekday]}
+              >
+                {weekdays[weekday].slice(0, 2)}
+              </button>
+            ))}
+          </div>
+          <div className="availability-range">
+            <label><span>Starts</span><input type="date" value={form.startDate} onChange={(event) => setForm({ ...form, startDate: event.target.value })} /></label>
+            <label><span>Ends</span><input type="date" value={form.endDate} onChange={(event) => setForm({ ...form, endDate: event.target.value })} /></label>
+          </div>
+        </>
       )}
-      <input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} />
-      <div className="two-col">
+      <div className="availability-time-fields">
         <input type="time" value={form.startTime} onChange={(event) => setForm({ ...form, startTime: event.target.value })} />
         <input type="time" value={form.endTime} onChange={(event) => setForm({ ...form, endTime: event.target.value })} />
       </div>
       <input placeholder="Note" value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} />
-      <button className="secondary-button" type="submit"><Check size={16} /> Save</button>
+      <button className="secondary-button availability-save" type="submit"><Check size={16} /> Save {form.mode === "weekly" ? "weekly" : ""}</button>
+      {status && <p className={`availability-status${status.includes("invalid") || status.includes("required") ? " form-error" : ""}`}>{status}</p>}
     </form>
   );
 }
-
-const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 function RecurringAvailability({ refresh }) {
   const [rules, setRules] = useState([]);
   const [presets, setPresets] = useState([]);
   const [rule, setRule] = useState({
-    weekday: 5,
+    weekdays: [5],
     startTime: "19:00",
     endTime: "23:00",
     note: "",
@@ -523,13 +683,36 @@ function RecurringAvailability({ refresh }) {
     load();
   }
 
+  function toggleRuleWeekday(weekday) {
+    setRule((current) => {
+      const exists = current.weekdays.includes(weekday);
+      if (exists && current.weekdays.length === 1) return current;
+      return {
+        ...current,
+        weekdays: exists
+          ? current.weekdays.filter((item) => item !== weekday)
+          : [...current.weekdays, weekday]
+      };
+    });
+  }
+
   return (
     <section className="recurring-panel">
       <form className="table-panel compact-form" onSubmit={addRule}>
-        <div className="panel-heading"><Repeat size={18} /><div><h2>Recurring availability</h2><p>Repeat weekly, then skip individual dates from the list.</p></div></div>
-        <select value={rule.weekday} onChange={(event) => setRule({ ...rule, weekday: Number(event.target.value) })}>
-          {weekdays.map((day, index) => <option value={index} key={day}>{day}</option>)}
-        </select>
+        <div className="panel-heading"><Repeat size={18} /><div><h2>Advanced recurring schedule</h2><p>Choose several weekdays, then skip individual dates from the availability list.</p></div></div>
+        <div className="weekday-picker weekday-picker-large" aria-label="Recurring weekdays">
+          {weekdayOrder.map((weekday) => (
+            <button
+              type="button"
+              className={rule.weekdays.includes(weekday) ? "active" : ""}
+              onClick={() => toggleRuleWeekday(weekday)}
+              key={weekday}
+              aria-pressed={rule.weekdays.includes(weekday)}
+            >
+              {weekdays[weekday].slice(0, 3)}
+            </button>
+          ))}
+        </div>
         <div className="two-col">
           <input type="time" value={rule.startTime} onChange={(event) => setRule({ ...rule, startTime: event.target.value })} />
           <input type="time" value={rule.endTime} onChange={(event) => setRule({ ...rule, endTime: event.target.value })} />
@@ -589,10 +772,11 @@ function FreeTimeView({ user, availability, refresh }) {
     <>
       <header className="topbar">
         <div>
-          <h1>Free Time</h1>
-          <p>Manage availability entries without leaving the main calendar quick-add in place.</p>
+          <h1>Availability</h1>
+          <p>Add one-off free time, build a weekly schedule, and manage exceptions.</p>
         </div>
       </header>
+      <RecurringAvailability refresh={refresh} />
       <div className="free-time-layout">
         <AvailabilityForm selectedDate={selectedDate} onCreated={refresh} />
         <section className="table-panel">
@@ -625,7 +809,6 @@ function FreeTimeView({ user, availability, refresh }) {
           </div>
         </section>
       </div>
-      <RecurringAvailability refresh={refresh} />
     </>
   );
 }
@@ -754,7 +937,7 @@ function BestTimePanel({ slots, onUse }) {
   );
 }
 
-function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, searchGames }) {
+function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, searchGames, onManageAvailability }) {
   const weekStart = useMemo(() => addDays(startOfWeek(), weekOffset * 7), [weekOffset]);
   const days = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
   const [bestSlots, setBestSlots] = useState([]);
@@ -805,7 +988,13 @@ function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, searchGa
               onReschedule={rescheduleEvent}
             />
           </div>
-          <AvailabilityForm selectedDate={localDate(days[0])} onCreated={refresh} compact draft={availabilityDraft} />
+          <AvailabilityForm
+            selectedDate={localDate(days[0])}
+            onCreated={refresh}
+            compact
+            draft={availabilityDraft}
+            onManage={onManageAvailability}
+          />
           <EventForm games={data.games} friends={data.friends} selectedDate={localDate(days[0])} onSearchGames={searchGames} onCreated={refresh} />
         </div>
         <div className="side-stack">
@@ -833,7 +1022,7 @@ function GameRail({ games, onSearchGames }) {
         <div className="game-list">
           {games.slice(0, 6).map((game) => (
             <article key={game.appId}>
-              {game.image ? <img src={game.image} alt="" /> : <Gamepad2 size={17} />}
+              <SteamImage src={game.image} />
               <div>
                 <strong>{game.title}</strong>
                 <span>{game.price || "Steam app"} - #{game.appId}</span>
@@ -986,7 +1175,7 @@ function EventDetails({ user, event, refresh, onDelete }) {
             <div className="vote-grid">
               {event.gameOptions.map((option) => (
                 <button className={`${myVote === option.id ? "selected" : ""}${option.imageUrl ? " has-image" : ""}`} type="button" onClick={() => vote(option.id)} key={option.id}>
-                  {option.imageUrl && <img src={option.imageUrl} alt="" />}
+                  {option.imageUrl && <SteamImage src={option.imageUrl} />}
                   <span><strong>{option.title}</strong><small>{option.voteCount} vote{option.voteCount === 1 ? "" : "s"}</small></span>
                   {event.selectedGameOptionId === option.id && <Sparkles size={16} />}
                 </button>
@@ -1084,7 +1273,7 @@ function GamesView({ games, searchGames }) {
           <div className="steam-results">
             {games.map((game) => (
               <button className="steam-result" key={game.appId} onClick={() => loadDetails(game.appId)}>
-                {game.image ? <img src={game.image} alt="" /> : <span className="image-fallback"><Gamepad2 /></span>}
+                <SteamImage src={game.image} />
                 <div>
                   <strong>{game.title}</strong>
                   <span>{game.price || "Steam app"} - #{game.appId}</span>
@@ -1095,7 +1284,7 @@ function GamesView({ games, searchGames }) {
           <aside className="game-detail">
             {selected ? (
               <>
-                {selected.image && <img src={selected.image} alt="" />}
+                <SteamImage src={selected.image} className="game-detail-image" />
                 <h2>{selected.title}</h2>
                 <p>{selected.shortDescription || "No Steam description available."}</p>
                 <div className="tag-list">
@@ -1174,7 +1363,7 @@ function DashboardView({ dashboard, setActiveView }) {
           <div className="suggestion-grid">
             {dashboard.recentSuggestions.map((game) => (
               <a href={`https://store.steampowered.com/app/${game.steamAppId}/`} target="_blank" rel="noreferrer" key={game.id}>
-                {game.imageUrl ? <img src={game.imageUrl} alt="" /> : <span className="image-fallback"><Gamepad2 /></span>}
+                <SteamImage src={game.imageUrl} />
                 <span><strong>{game.title}</strong><small>{game.suggestedBy}</small></span>
               </a>
             ))}
@@ -1612,7 +1801,17 @@ function App() {
           {pendingInviteCount > 0 && <span>{pendingInviteCount}</span>}
         </button>
         {activeView === "dashboard" && <DashboardView dashboard={data.dashboard} setActiveView={setActiveView} />}
-        {activeView === "calendar" && <CalendarView user={user} data={data} weekOffset={weekOffset} setWeekOffset={setWeekOffset} refresh={refresh} searchGames={searchGames} />}
+        {activeView === "calendar" && (
+          <CalendarView
+            user={user}
+            data={data}
+            weekOffset={weekOffset}
+            setWeekOffset={setWeekOffset}
+            refresh={refresh}
+            searchGames={searchGames}
+            onManageAvailability={() => setActiveView("free-time")}
+          />
+        )}
         {activeView === "tonight" && <TonightView dashboard={data.dashboard} setActiveView={setActiveView} />}
         {activeView === "events" && <EventsView user={user} events={data.events} refresh={refresh} />}
         {activeView === "invites" && <InvitesView user={user} events={data.events} refresh={refresh} />}

@@ -8,7 +8,7 @@ SquadSlot is a self-hosted gaming calendar for friend groups. It helps a squad s
 - First registered account automatically becomes the admin
 - Shared weekly calendar with previous/next week navigation
 - Dashboard and Tonight mode
-- Availability logging, recurring weekly rules, date exceptions, and presets
+- One-off and recurring availability with multi-day drag selection, date exceptions, and quick presets
 - Best-time finder with overlap highlighting
 - Steam-backed game search and game detail lookup
 - Session creation with friend invites and player capacity

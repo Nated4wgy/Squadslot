@@ -375,6 +375,23 @@ textarea {
   padding: 20px 20px 16px;
 }
 
+.calendar-title-actions,
+.availability-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.calendar-drag-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #667171;
+  font-size: 0.8rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
 .live-chip {
   display: inline-flex;
   align-items: center;
@@ -584,20 +601,174 @@ textarea {
   margin: 0;
 }
 
-.utility-form-compact {
-  grid-template-columns: max-content minmax(140px, 170px) minmax(200px, 240px) minmax(130px, 1fr) max-content;
+.availability-composer {
+  align-content: start;
+}
+
+.availability-form-head {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.availability-form-head h3 {
+  white-space: nowrap;
+}
+
+.segmented-control {
+  min-height: 34px;
+  padding: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 6px;
+  background: rgba(21, 25, 26, 0.08);
+}
+
+.segmented-control button,
+.manage-availability-button {
+  min-height: 28px;
+  border: 0;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  background: transparent;
+  color: #4b5455;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.segmented-control button.active {
+  background: #15191a;
+  color: #f5f1e8;
+}
+
+.manage-availability-button {
+  min-height: 34px;
+  border: 1px solid rgba(21, 25, 26, 0.12);
+}
+
+.quick-preset-field,
+.availability-date-field,
+.availability-range label {
+  gap: 4px;
+}
+
+.quick-preset-field > span,
+.availability-date-field > span,
+.availability-range label > span {
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+.availability-time-fields,
+.availability-range {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.availability-time-fields > input,
+.availability-range input {
+  min-width: 0;
+}
+
+.weekday-picker {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(32px, 1fr));
+  gap: 5px;
+}
+
+.weekday-picker button {
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid rgba(21, 25, 26, 0.13);
+  border-radius: 5px;
+  background: rgba(21, 25, 26, 0.05);
+  color: #4b5455;
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.weekday-picker button.active {
+  border-color: #15191a;
+  background: var(--accent);
+  color: #101313;
+}
+
+.weekday-picker-large button {
+  min-height: 42px;
+}
+
+.availability-status {
+  margin: 0;
+  color: #4f5b5a;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.utility-form-compact {
+  grid-template-columns: minmax(150px, 0.85fr) minmax(140px, 0.75fr) minmax(180px, 0.9fr) minmax(140px, 1fr) max-content;
+  align-items: end;
   gap: 10px;
   padding: 14px 16px;
 }
 
-.utility-form-compact h3 {
-  margin-right: 6px;
-  white-space: nowrap;
+.utility-form-compact .availability-form-head,
+.utility-form-compact .availability-status {
+  grid-column: 1 / -1;
 }
 
-.utility-form-compact .secondary-button {
-  min-width: 92px;
+.utility-form-compact .availability-save {
+  min-width: 106px;
+}
+
+.utility-form-compact.availability-mode-once .quick-preset-field {
+  grid-column: 1;
+}
+
+.utility-form-compact.availability-mode-once .availability-date-field {
+  grid-column: 2;
+}
+
+.utility-form-compact.availability-mode-once .availability-time-fields {
+  grid-column: 3;
+}
+
+.utility-form-compact.availability-mode-once > input {
+  grid-column: 4;
+}
+
+.utility-form-compact.availability-mode-once .availability-save {
+  grid-column: 5;
+}
+
+.utility-form-compact.availability-mode-weekly .quick-preset-field {
+  grid-column: 1;
+}
+
+.utility-form-compact.availability-mode-weekly .weekday-picker {
+  grid-column: 2 / 4;
+}
+
+.utility-form-compact.availability-mode-weekly .availability-range {
+  grid-column: 4 / 6;
+}
+
+.utility-form-compact.availability-mode-weekly .availability-time-fields {
+  grid-column: 1 / 3;
+}
+
+.utility-form-compact.availability-mode-weekly > input {
+  grid-column: 3 / 5;
+}
+
+.utility-form-compact.availability-mode-weekly .availability-save {
+  grid-column: 5;
 }
 
 .toolbar,
@@ -769,6 +940,7 @@ textarea {
 }
 
 .free-time-layout {
+  margin-top: 20px;
   display: grid;
   grid-template-columns: 360px minmax(0, 1fr);
   gap: 20px;
@@ -987,8 +1159,12 @@ textarea {
   color: #f5f1e8;
 }
 
-.game-detail > img {
+.game-detail > img,
+.game-detail > .image-fallback {
   width: 100%;
+  height: auto;
+  aspect-ratio: 460 / 215;
+  object-fit: cover;
   border-radius: 6px;
   margin-bottom: 12px;
 }
@@ -1183,6 +1359,10 @@ textarea {
   user-select: none;
 }
 
+.selectable-slot {
+  cursor: crosshair;
+}
+
 .slot.best-slot {
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 75%, #101313);
 }
@@ -1284,7 +1464,6 @@ textarea {
 }
 
 .recurring-panel {
-  margin-top: 20px;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20px;
@@ -1585,7 +1764,8 @@ textarea {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
-.vote-grid img {
+.vote-grid img,
+.vote-grid .image-fallback {
   width: 64px;
   height: 36px;
   border-radius: 4px;
@@ -1786,10 +1966,6 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .utility-form-compact {
-    grid-template-columns: max-content minmax(140px, 170px) minmax(200px, 240px) minmax(130px, 1fr) max-content;
-  }
-
   .side-stack,
   .admin-grid,
   .games-browser,
@@ -1809,15 +1985,28 @@ textarea {
 
 @media (min-width: 721px) and (max-width: 900px) {
   .utility-form-compact {
-    grid-template-columns: max-content minmax(150px, 1fr) minmax(230px, 1.35fr);
+    grid-template-columns: 1fr 1fr;
   }
 
-  .utility-form-compact > input:not([type="date"]) {
-    grid-column: 1 / 3;
+  .utility-form-compact .availability-form-head,
+  .utility-form-compact .availability-status,
+  .utility-form-compact.availability-mode-weekly .weekday-picker,
+  .utility-form-compact.availability-mode-weekly .availability-range,
+  .utility-form-compact.availability-mode-weekly > input,
+  .utility-form-compact .availability-save {
+    grid-column: 1 / -1;
   }
 
-  .utility-form-compact .secondary-button {
-    width: 100%;
+  .utility-form-compact.availability-mode-once .quick-preset-field,
+  .utility-form-compact.availability-mode-weekly .quick-preset-field,
+  .utility-form-compact.availability-mode-weekly .availability-time-fields {
+    grid-column: 1;
+  }
+
+  .utility-form-compact.availability-mode-once .availability-date-field,
+  .utility-form-compact.availability-mode-once .availability-time-fields,
+  .utility-form-compact.availability-mode-once > input {
+    grid-column: 2;
   }
 }
 
@@ -1869,6 +2058,29 @@ textarea {
 
   .utility-form-compact h3 {
     margin-right: 0;
+  }
+
+  .utility-form-compact > * {
+    grid-column: 1 / -1 !important;
+  }
+
+  .availability-form-head,
+  .calendar-title-actions {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .availability-form-actions {
+    justify-content: space-between;
+  }
+
+  .segmented-control {
+    flex: 1;
+  }
+
+  .segmented-control button {
+    flex: 1;
   }
 
   .utility-form-compact .secondary-button {

@@ -741,21 +741,33 @@ app.get("/api/availability/recurring", requireAuth, (req, res) => {
 });
 
 app.post("/api/availability/recurring", requireAuth, (req, res) => {
-  const weekday = Number(req.body.weekday);
+  const requestedWeekdays = Array.isArray(req.body.weekdays)
+    ? req.body.weekdays.map(Number)
+    : [Number(req.body.weekday)];
+  const weekdays = [...new Set(requestedWeekdays)];
   const startTime = cleanText(req.body.startTime);
   const endTime = cleanText(req.body.endTime);
   const note = cleanText(req.body.note).slice(0, 200);
   const startDate = cleanText(req.body.startDate, dateString(new Date()));
   const endDate = cleanText(req.body.endDate) || null;
-  if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return res.status(400).json({ error: "Weekday is invalid." });
+  if (
+    weekdays.length === 0
+    || weekdays.some((weekday) => !Number.isInteger(weekday) || weekday < 0 || weekday > 6)
+  ) {
+    return res.status(400).json({ error: "At least one valid weekday is required." });
+  }
   if (!isTimeString(startTime) || !isTimeString(endTime) || startTime >= endTime) return res.status(400).json({ error: "Recurring times are invalid." });
   if (!isDateString(startDate) || (endDate && (!isDateString(endDate) || endDate < startDate))) return res.status(400).json({ error: "Recurring date range is invalid." });
 
-  const result = db.prepare(`
+  const insertRule = db.prepare(`
     INSERT INTO availability_rules (user_id, weekday, start_time, end_time, note, start_date, end_date)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(req.user.id, weekday, startTime, endTime, note, startDate, endDate);
-  res.status(201).json({ id: result.lastInsertRowid });
+  `);
+  const insertRules = db.transaction((days) => days.map((weekday) => (
+    insertRule.run(req.user.id, weekday, startTime, endTime, note, startDate, endDate).lastInsertRowid
+  )));
+  const ids = insertRules(weekdays);
+  res.status(201).json({ id: ids[0], ids });
 });
 
 app.delete("/api/availability/recurring/:id", requireAuth, (req, res) => {

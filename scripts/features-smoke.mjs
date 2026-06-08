@@ -133,9 +133,15 @@ async function main() {
 
     result = await request("/api/availability/recurring", adminCookie, {
       method: "POST",
-      body: JSON.stringify({ weekday: 5, startTime: "19:00", endTime: "23:00", startDate: freeDate, endDate: "", note: "Friday" })
+      body: JSON.stringify({ weekdays: [1, 3, 5], startTime: "19:00", endTime: "23:00", startDate: freeDate, endDate: "", note: "Multi-day schedule" })
     });
-    assert(result.response.status === 201, "Recurring availability creation failed.");
+    assert(result.response.status === 201 && result.payload.ids.length === 3, "Multi-day recurring availability creation failed.");
+
+    result = await request("/api/availability/recurring", adminCookie);
+    assert(
+      result.response.ok && [1, 3, 5].every((weekday) => result.payload.rules.some((rule) => rule.weekday === weekday)),
+      "Multi-day recurring rules were not returned."
+    );
 
     result = await request("/api/availability/presets", adminCookie, {
       method: "POST",
@@ -213,6 +219,14 @@ async function main() {
       })
     });
     assert(result.response.ok, "Reminder settings failed.");
+
+    result = await request("/service-worker.js", "");
+    assert(
+      result.response.ok
+      && result.payload.includes("requestUrl.origin !== self.location.origin")
+      && !result.payload.includes("cached || caches.match"),
+      "Service worker must not replace external Steam images with the app shell."
+    );
 
     assert(adminId !== friendId, "Test users should be distinct.");
     console.log("Feature smoke test passed.");
