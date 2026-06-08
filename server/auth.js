@@ -5,7 +5,7 @@ const defaultSecret = "dev-secret-change-me";
 const secret = process.env.SESSION_SECRET || defaultSecret;
 
 if (process.env.NODE_ENV === "production" && (secret === defaultSecret || secret.length < 32)) {
-  throw new Error("SESSION_SECRET must be set to at least 32 characters in production.");
+  throw new Error("SESSION_SECRET must be set to at least 32 characters in production. Put it in the deployment .env file or pass it to docker run.");
 }
 
 function base64url(input) {

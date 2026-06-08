@@ -6,17 +6,27 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Download,
+  Dices,
   Trash2,
   Gamepad2,
   Link,
+  LayoutDashboard,
   LogOut,
   Bell,
+  MessageSquare,
+  Moon,
   Plus,
+  Repeat,
   Search,
   Send,
   Settings,
   Shield,
   Sparkles,
+  Sun,
+  UserRound,
+  Vote,
+  Zap,
   UsersRound
 } from "lucide-react";
 import "./styles.css";
@@ -37,6 +47,13 @@ function addDays(date, amount) {
   return copy;
 }
 
+function nextWeekday(weekday) {
+  const date = new Date();
+  const delta = (weekday - date.getDay() + 7) % 7;
+  date.setDate(date.getDate() + delta);
+  return localDate(date);
+}
+
 function localDate(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -46,6 +63,42 @@ function localDate(date) {
 
 function formatDay(date) {
   return new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric" }).format(date);
+}
+
+function formatDate(value, options = { weekday: "short", day: "numeric", month: "short" }) {
+  return new Intl.DateTimeFormat("en-GB", options).format(new Date(`${value}T12:00:00`));
+}
+
+function addTime(time, hoursToAdd) {
+  const [hours, minutes] = time.split(":").map(Number);
+  const total = Math.min((23 * 60) + 59, (hours * 60) + minutes + (hoursToAdd * 60));
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function eventDurationHours(event) {
+  const [startHour, startMinute] = event.startTime.split(":").map(Number);
+  const [endHour, endMinute] = event.endTime.split(":").map(Number);
+  return Math.max(1, Math.ceil(((endHour * 60 + endMinute) - (startHour * 60 + startMinute)) / 60));
+}
+
+function Avatar({ user, size = "medium" }) {
+  const name = user.displayName || user.ownerName || "?";
+  if (user.avatarUrl || user.ownerAvatarUrl) {
+    return <img className={`avatar avatar-${size}`} src={user.avatarUrl || user.ownerAvatarUrl} alt="" />;
+  }
+  return (
+    <span className={`avatar avatar-${size} avatar-initials`} style={{ "--avatar-color": user.profileColor || user.ownerColor || "#2fd3ba" }}>
+      {name.slice(0, 2).toUpperCase()}
+    </span>
+  );
+}
+
+function Skeleton({ rows = 3 }) {
+  return (
+    <div className="skeleton-list" aria-label="Loading">
+      {Array.from({ length: rows }, (_, index) => <span className="skeleton-row" key={index} />)}
+    </div>
+  );
 }
 
 function useDebouncedSteamSearch(query, onSearchGames) {
@@ -95,8 +148,7 @@ function AuthScreen({ onSignedIn }) {
     <main className="auth-shell">
       <section className="auth-panel">
         <div className="brand-lockup">
-          <span className="brand-mark"><Gamepad2 size={26} /></span>
-          <span>SquadSlot</span>
+          <img className="brand-logo" src="/squadslot-logo.png" alt="SquadSlot" />
         </div>
         <h1>Plan the next session without the chat scroll.</h1>
         <p>{mode === "register" ? "The first account created becomes the admin." : "Sign in to see the group calendar."}</p>
@@ -129,19 +181,21 @@ function AuthScreen({ onSignedIn }) {
 
 function Sidebar({ user, activeView, setActiveView, onLogout }) {
   const nav = [
+    ["dashboard", "Dashboard", LayoutDashboard],
     ["calendar", "Calendar", CalendarDays],
+    ["tonight", "Tonight", Zap],
     ["events", "Events", Clock],
     ["free-time", "Free Time", Check],
     ["friends", "Friends", UsersRound],
     ["games", "Games", Gamepad2],
+    ["profile", "Profile", UserRound],
     ...(user.role === "admin" ? [["admin", "Admin", Shield]] : [])
   ];
 
   return (
     <aside className="sidebar">
       <div className="brand-lockup compact">
-        <span className="brand-mark"><Gamepad2 size={22} /></span>
-        <span>SquadSlot</span>
+        <img className="brand-logo" src="/squadslot-logo.png" alt="SquadSlot" />
       </div>
       <nav>
         {nav.map(([id, label, Icon]) => (
@@ -151,9 +205,12 @@ function Sidebar({ user, activeView, setActiveView, onLogout }) {
         ))}
       </nav>
       <div className="profile">
-        <div>
+        <div className="profile-identity">
+          <Avatar user={user} size="small" />
+          <div>
           <strong>{user.displayName}</strong>
           <span>@{user.username} {user.role === "admin" ? "- admin" : ""}</span>
+          </div>
         </div>
         <button onClick={onLogout} aria-label="Sign out"><LogOut size={18} /></button>
       </div>
@@ -171,6 +228,7 @@ function EventPopover({ event }) {
       <span>{event.gameTitle || "Game TBD"}</span>
       <span>{event.date}, {event.startTime} to {event.endTime}</span>
       <span>Created by {event.ownerName}</span>
+      <span>{accepted.length}/{event.maxPlayers} accepted, minimum {event.minPlayers}</span>
       <div>
         <small>Accepted</small>
         <p>{accepted.map((invite) => invite.displayName).join(", ") || "No one yet"}</p>
@@ -191,7 +249,7 @@ function AvailabilityPopover({ freeItems }) {
       <strong>Free players</strong>
       {freeItems.map((item) => (
         <div key={item.id}>
-          <span>{item.displayName}</span>
+          <span className="person-line"><Avatar user={item} size="tiny" /> {item.displayName}</span>
           <small>{item.startTime} to {item.endTime}{item.note ? ` - ${item.note}` : ""}</small>
         </div>
       ))}
@@ -199,7 +257,9 @@ function AvailabilityPopover({ freeItems }) {
   );
 }
 
-function CalendarGrid({ days, availability, events }) {
+function CalendarGrid({ user, days, availability, events, bestSlots, onAvailabilityDraft, onReschedule }) {
+  const [dragSelection, setDragSelection] = useState(null);
+
   function committedInviteUserIds(dayEvents) {
     return new Set(
       dayEvents.flatMap((event) =>
@@ -209,6 +269,29 @@ function CalendarGrid({ days, availability, events }) {
       )
     );
   }
+
+  function finishAvailabilityDrag() {
+    if (!dragSelection) return;
+    const startHour = Math.min(dragSelection.startHour, dragSelection.endHour);
+    const endHour = Math.max(dragSelection.startHour, dragSelection.endHour);
+    onAvailabilityDraft({
+      date: dragSelection.date,
+      startTime: `${String(startHour).padStart(2, "0")}:00`,
+      endTime: endHour >= 23 ? "23:59" : `${String(endHour + 1).padStart(2, "0")}:00`
+    });
+    setDragSelection(null);
+  }
+
+  useEffect(() => {
+    function handleMouseUp() {
+      finishAvailabilityDrag();
+    }
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => window.removeEventListener("mouseup", handleMouseUp);
+  });
+
+  const bestKeys = new Set(bestSlots.filter((slot) => slot.count === bestSlots[0]?.count).map((slot) => `${slot.date}-${slot.startTime}`));
+  const maxOverlap = Math.max(1, ...bestSlots.map((slot) => slot.count));
 
   return (
     <section className="calendar-panel">
@@ -232,11 +315,35 @@ function CalendarGrid({ days, availability, events }) {
               const committedUsers = committedInviteUserIds(dayEvents);
               const freeItems = dayAvailability.filter((item) => !committedUsers.has(item.userId));
               const freeNames = [...new Set(freeItems.map((item) => item.displayName))];
+              const slotKey = `${date}-${hour}`;
+              const overlap = freeNames.length / maxOverlap;
+              const hourNumber = Number(hour.slice(0, 2));
+              const selected = dragSelection?.date === date
+                && hourNumber >= Math.min(dragSelection.startHour, dragSelection.endHour)
+                && hourNumber <= Math.max(dragSelection.startHour, dragSelection.endHour);
               return (
-                <div className="slot" key={`${date}-${hour}`}>
+                <div
+                  className={`slot${bestKeys.has(slotKey) ? " best-slot" : ""}${selected ? " selecting-slot" : ""}`}
+                  key={slotKey}
+                  style={{ "--overlap-strength": `${Math.round(overlap * 18)}%` }}
+                  onMouseDown={(event) => {
+                    if (event.button !== 0 || event.target.closest(".event-block")) return;
+                    setDragSelection({ date, startHour: hourNumber, endHour: hourNumber });
+                  }}
+                  onMouseEnter={() => {
+                    if (dragSelection?.date === date) setDragSelection({ ...dragSelection, endHour: hourNumber });
+                  }}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const eventId = Number(event.dataTransfer.getData("text/event-id"));
+                    const duration = Number(event.dataTransfer.getData("text/event-duration")) || 1;
+                    if (eventId) onReschedule(eventId, date, hour, addTime(hour, duration));
+                  }}
+                >
                   {freeNames.length > 0 && (
                     <div className="availability-block availability-group availability-with-popover" tabIndex={0}>
-                      <strong>{freeNames.length} free</strong>
+                      <strong>{bestKeys.has(slotKey) && <Sparkles size={12} />} {freeNames.length} free</strong>
                       <span>{freeNames.slice(0, 3).join(", ")}{freeNames.length > 3 ? ` +${freeNames.length - 3}` : ""}</span>
                       <AvailabilityPopover freeItems={freeItems} />
                     </div>
@@ -244,11 +351,22 @@ function CalendarGrid({ days, availability, events }) {
                   {dayEvents.slice(0, 2).map((item) => {
                     const accepted = item.invites.filter((invite) => invite.status === "accepted");
                     const tentative = item.invites.filter((invite) => invite.status === "tentative");
+                    const canMove = item.ownerId === user.id || user.role === "admin";
                     return (
-                    <div className="event-block event-with-popover" key={`e-${item.id}`} tabIndex={0}>
+                    <div
+                      className={`event-block event-with-popover${item.ready ? " event-ready" : ""}`}
+                      key={`e-${item.id}`}
+                      tabIndex={0}
+                      draggable={canMove}
+                      onDragStart={(event) => {
+                        event.stopPropagation();
+                        event.dataTransfer.setData("text/event-id", String(item.id));
+                        event.dataTransfer.setData("text/event-duration", String(eventDurationHours(item)));
+                      }}
+                    >
                       <strong>{item.title}</strong>
                       <span>{item.gameTitle || "Game TBD"}</span>
-                      <small>{accepted.length} accepted{tentative.length ? `, ${tentative.length} tentative` : ""}</small>
+                      <small>{item.ready && <Sparkles size={11} />} {accepted.length}/{item.maxPlayers} accepted{tentative.length ? `, ${tentative.length} tentative` : ""}</small>
                       <EventPopover event={item} />
                     </div>
                     );
@@ -303,10 +421,17 @@ function EventList({ user, events, refresh }) {
   );
 }
 
-function AvailabilityForm({ selectedDate, onCreated }) {
+function AvailabilityForm({ selectedDate, onCreated, compact = false, draft }) {
   const [form, setForm] = useState({ date: selectedDate, startTime: "19:00", endTime: "22:00", note: "" });
+  const [presets, setPresets] = useState([]);
 
   useEffect(() => setForm((current) => ({ ...current, date: selectedDate })), [selectedDate]);
+  useEffect(() => {
+    api("/api/availability/presets").then((payload) => setPresets(payload.presets)).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (draft) setForm((current) => ({ ...current, ...draft }));
+  }, [draft]);
 
   async function submit(event) {
     event.preventDefault();
@@ -315,9 +440,26 @@ function AvailabilityForm({ selectedDate, onCreated }) {
     onCreated();
   }
 
+  function applyPreset(preset) {
+    setForm((current) => ({
+      ...current,
+      date: preset.date || (preset.weekday === null || preset.weekday === undefined ? current.date : nextWeekday(preset.weekday)),
+      startTime: preset.startTime,
+      endTime: preset.endTime,
+      note: preset.note || ""
+    }));
+  }
+
   return (
-    <form className="utility-form" onSubmit={submit}>
+    <form className={`utility-form${compact ? " utility-form-compact" : ""}`} onSubmit={submit}>
       <h3>Log free time</h3>
+      {!compact && (
+        <div className="preset-strip">
+          <button type="button" onClick={() => applyPreset({ date: localDate(new Date()), startTime: "19:00", endTime: "23:00", note: "Tonight" })}>Tonight</button>
+          <button type="button" onClick={() => applyPreset({ weekday: 5, startTime: "19:00", endTime: "23:00", note: "Friday evening" })}>Friday evening</button>
+          {presets.map((preset) => <button type="button" onClick={() => applyPreset(preset)} key={preset.id}>{preset.name}</button>)}
+        </div>
+      )}
       <input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} />
       <div className="two-col">
         <input type="time" value={form.startTime} onChange={(event) => setForm({ ...form, startTime: event.target.value })} />
@@ -326,6 +468,109 @@ function AvailabilityForm({ selectedDate, onCreated }) {
       <input placeholder="Note" value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} />
       <button className="secondary-button" type="submit"><Check size={16} /> Save</button>
     </form>
+  );
+}
+
+const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function RecurringAvailability({ refresh }) {
+  const [rules, setRules] = useState([]);
+  const [presets, setPresets] = useState([]);
+  const [rule, setRule] = useState({
+    weekday: 5,
+    startTime: "19:00",
+    endTime: "23:00",
+    note: "",
+    startDate: localDate(new Date()),
+    endDate: ""
+  });
+  const [preset, setPreset] = useState({ name: "", weekday: 5, startTime: "19:00", endTime: "23:00", note: "" });
+
+  async function load() {
+    const [rulesPayload, presetsPayload] = await Promise.all([
+      api("/api/availability/recurring"),
+      api("/api/availability/presets")
+    ]);
+    setRules(rulesPayload.rules);
+    setPresets(presetsPayload.presets);
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function addRule(event) {
+    event.preventDefault();
+    await api("/api/availability/recurring", { method: "POST", body: JSON.stringify(rule) });
+    setRule({ ...rule, note: "" });
+    await load();
+    refresh();
+  }
+
+  async function removeRule(id) {
+    await api(`/api/availability/recurring/${id}`, { method: "DELETE" });
+    await load();
+    refresh();
+  }
+
+  async function addPreset(event) {
+    event.preventDefault();
+    await api("/api/availability/presets", { method: "POST", body: JSON.stringify(preset) });
+    setPreset({ ...preset, name: "", note: "" });
+    load();
+  }
+
+  async function removePreset(id) {
+    await api(`/api/availability/presets/${id}`, { method: "DELETE" });
+    load();
+  }
+
+  return (
+    <section className="recurring-panel">
+      <form className="table-panel compact-form" onSubmit={addRule}>
+        <div className="panel-heading"><Repeat size={18} /><div><h2>Recurring availability</h2><p>Repeat weekly, then skip individual dates from the list.</p></div></div>
+        <select value={rule.weekday} onChange={(event) => setRule({ ...rule, weekday: Number(event.target.value) })}>
+          {weekdays.map((day, index) => <option value={index} key={day}>{day}</option>)}
+        </select>
+        <div className="two-col">
+          <input type="time" value={rule.startTime} onChange={(event) => setRule({ ...rule, startTime: event.target.value })} />
+          <input type="time" value={rule.endTime} onChange={(event) => setRule({ ...rule, endTime: event.target.value })} />
+        </div>
+        <div className="two-col">
+          <label>Starts<input type="date" value={rule.startDate} onChange={(event) => setRule({ ...rule, startDate: event.target.value })} /></label>
+          <label>Ends (optional)<input type="date" value={rule.endDate} onChange={(event) => setRule({ ...rule, endDate: event.target.value })} /></label>
+        </div>
+        <input placeholder="Note" value={rule.note} onChange={(event) => setRule({ ...rule, note: event.target.value })} />
+        <button className="secondary-button"><Repeat size={16} /> Add weekly rule</button>
+        <div className="rule-list">
+          {rules.map((item) => (
+            <div key={item.id}>
+              <span><strong>{weekdays[item.weekday]}</strong> {item.startTime}-{item.endTime}</span>
+              <button type="button" className="danger-button" onClick={() => removeRule(item.id)} aria-label="Delete recurring rule"><Trash2 size={15} /></button>
+            </div>
+          ))}
+        </div>
+      </form>
+      <form className="table-panel compact-form" onSubmit={addPreset}>
+        <div className="panel-heading"><Sparkles size={18} /><div><h2>Saved presets</h2><p>Create one-click availability shortcuts.</p></div></div>
+        <input placeholder="Preset name" value={preset.name} onChange={(event) => setPreset({ ...preset, name: event.target.value })} />
+        <select value={preset.weekday} onChange={(event) => setPreset({ ...preset, weekday: Number(event.target.value) })}>
+          {weekdays.map((day, index) => <option value={index} key={day}>{day}</option>)}
+        </select>
+        <div className="two-col">
+          <input type="time" value={preset.startTime} onChange={(event) => setPreset({ ...preset, startTime: event.target.value })} />
+          <input type="time" value={preset.endTime} onChange={(event) => setPreset({ ...preset, endTime: event.target.value })} />
+        </div>
+        <input placeholder="Note" value={preset.note} onChange={(event) => setPreset({ ...preset, note: event.target.value })} />
+        <button className="secondary-button"><Plus size={16} /> Save preset</button>
+        <div className="rule-list">
+          {presets.map((item) => (
+            <div key={item.id}>
+              <span><strong>{item.name}</strong> {item.startTime}-{item.endTime}</span>
+              <button type="button" className="danger-button" onClick={() => removePreset(item.id)} aria-label="Delete preset"><Trash2 size={15} /></button>
+            </div>
+          ))}
+        </div>
+      </form>
+    </section>
   );
 }
 
@@ -367,7 +612,7 @@ function FreeTimeView({ user, availability, refresh }) {
                   <div>
                     <strong>{item.displayName}</strong>
                     <span>{item.date}, {item.startTime} to {item.endTime}</span>
-                    {item.note && <small>{item.note}</small>}
+                    <small>{item.recurring ? "Recurring - delete to skip this date" : "One-off"}{item.note ? ` - ${item.note}` : ""}</small>
                   </div>
                   {canDelete && (
                     <button className="danger-button" onClick={() => removeAvailability(item.id)} aria-label={`Delete free time for ${item.displayName}`}>
@@ -380,6 +625,7 @@ function FreeTimeView({ user, availability, refresh }) {
           </div>
         </section>
       </div>
+      <RecurringAvailability refresh={refresh} />
     </>
   );
 }
@@ -392,7 +638,12 @@ function EventForm({ games, friends, selectedDate, onSearchGames, onCreated }) {
     date: selectedDate,
     startTime: "20:00",
     endTime: "22:30",
-    inviteIds: []
+    inviteIds: [],
+    minPlayers: 2,
+    maxPlayers: 8,
+    rsvpDeadline: "",
+    notes: "",
+    gameOptions: []
   });
   const [query, setQuery] = useState("co-op");
 
@@ -402,6 +653,16 @@ function EventForm({ games, friends, selectedDate, onSearchGames, onCreated }) {
   function chooseGame(appId) {
     const game = games.find((item) => item.appId === Number(appId));
     setForm({ ...form, steamAppId: game?.appId || "", gameTitle: game?.title || "" });
+  }
+
+  function addGameOption() {
+    const game = games.find((item) => item.appId === Number(form.steamAppId));
+    if (!game || form.gameOptions.some((option) => option.steamAppId === game.appId)) return;
+    setForm({
+      ...form,
+      gameTitle: form.gameOptions.length === 0 ? game.title : form.gameTitle,
+      gameOptions: [...form.gameOptions, { steamAppId: game.appId, title: game.title, imageUrl: game.image || "" }]
+    });
   }
 
   async function submit(event) {
@@ -431,15 +692,36 @@ function EventForm({ games, friends, selectedDate, onSearchGames, onCreated }) {
         <input placeholder="Search Steam" value={query} onChange={(event) => setQuery(event.target.value)} />
         <button type="button" onClick={() => onSearchGames(query)} aria-label="Search games"><Search size={17} /></button>
       </div>
-      <select value={form.steamAppId} onChange={(event) => chooseGame(event.target.value)}>
-        <option value="">Pick a Steam game</option>
-        {games.map((game) => <option value={game.appId} key={game.appId}>{game.title}</option>)}
-      </select>
+      <div className="game-option-picker">
+        <select value={form.steamAppId} onChange={(event) => chooseGame(event.target.value)}>
+          <option value="">Pick a Steam game</option>
+          {games.map((game) => <option value={game.appId} key={game.appId}>{game.title}</option>)}
+        </select>
+        <button type="button" onClick={addGameOption} aria-label="Add game option"><Plus size={17} /></button>
+      </div>
+      <div className="game-option-chips">
+        {form.gameOptions.map((option) => (
+          <button
+            type="button"
+            key={option.steamAppId}
+            onClick={() => setForm({ ...form, gameOptions: form.gameOptions.filter((item) => item.steamAppId !== option.steamAppId) })}
+          >
+            {option.title} <span>×</span>
+          </button>
+        ))}
+        {form.gameOptions.length === 0 && <small>Add one or more games for invitees to vote on.</small>}
+      </div>
       <input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} />
       <div className="two-col">
         <input type="time" value={form.startTime} onChange={(event) => setForm({ ...form, startTime: event.target.value })} />
         <input type="time" value={form.endTime} onChange={(event) => setForm({ ...form, endTime: event.target.value })} />
       </div>
+      <div className="two-col">
+        <label>Minimum players<input type="number" min="1" max="100" value={form.minPlayers} onChange={(event) => setForm({ ...form, minPlayers: Number(event.target.value) })} /></label>
+        <label>Maximum players<input type="number" min={form.minPlayers} max="100" value={form.maxPlayers} onChange={(event) => setForm({ ...form, maxPlayers: Number(event.target.value) })} /></label>
+      </div>
+      <label>RSVP deadline<input type="datetime-local" value={form.rsvpDeadline} onChange={(event) => setForm({ ...form, rsvpDeadline: event.target.value })} /></label>
+      <textarea placeholder="Session notes, server details, mods, or voice channel" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
       <div className="invite-list">
         <span>Invite friends</span>
         {friends.length === 0 && <small>No other accounts yet.</small>}
@@ -454,9 +736,48 @@ function EventForm({ games, friends, selectedDate, onSearchGames, onCreated }) {
   );
 }
 
+function BestTimePanel({ slots, onUse }) {
+  return (
+    <section className="table-panel best-times-panel">
+      <div className="panel-heading"><Sparkles size={18} /><div><h3>Best slots this week</h3><p>Strongest availability overlap.</p></div></div>
+      {slots.length === 0 && <p className="muted">Log availability to reveal the best times.</p>}
+      <div className="best-time-list">
+        {slots.slice(0, 5).map((slot, index) => (
+          <button type="button" onClick={() => onUse(slot)} key={`${slot.date}-${slot.startTime}`}>
+            <span className="rank">{index + 1}</span>
+            <span><strong>{formatDate(slot.date)}</strong><small>{slot.startTime}-{slot.endTime}</small></span>
+            <span className="overlap-count">{slot.count} free</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, searchGames }) {
   const weekStart = useMemo(() => addDays(startOfWeek(), weekOffset * 7), [weekOffset]);
   const days = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
+  const [bestSlots, setBestSlots] = useState([]);
+  const [availabilityDraft, setAvailabilityDraft] = useState(null);
+  const [transitionDirection, setTransitionDirection] = useState("next");
+
+  useEffect(() => {
+    const start = localDate(days[0]);
+    const end = localDate(days[6]);
+    api(`/api/availability/best-times?start=${start}&end=${end}`)
+      .then((payload) => setBestSlots(payload.slots))
+      .catch(() => setBestSlots([]));
+  }, [days, data.availability, data.events]);
+
+  function moveWeek(amount) {
+    setTransitionDirection(amount < 0 ? "previous" : "next");
+    setWeekOffset(weekOffset + amount);
+  }
+
+  async function rescheduleEvent(eventId, date, startTime, endTime) {
+    await api(`/api/events/${eventId}`, { method: "PATCH", body: JSON.stringify({ date, startTime, endTime }) });
+    refresh();
+  }
 
   return (
     <>
@@ -466,18 +787,29 @@ function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, searchGa
           <p>{formatDay(days[0])} to {formatDay(days[6])}</p>
         </div>
         <div className="toolbar">
-          <button className="icon-button" onClick={() => setWeekOffset(weekOffset - 1)} aria-label="Previous week"><ChevronLeft /></button>
+          <button className="icon-button" onClick={() => moveWeek(-1)} aria-label="Previous week"><ChevronLeft /></button>
           <button className="secondary-button" onClick={() => setWeekOffset(0)}>Today</button>
-          <button className="icon-button" onClick={() => setWeekOffset(weekOffset + 1)} aria-label="Next week"><ChevronRight /></button>
+          <button className="icon-button" onClick={() => moveWeek(1)} aria-label="Next week"><ChevronRight /></button>
         </div>
       </header>
       <div className="content-layout">
         <div className="main-stack">
-          <CalendarGrid days={days} availability={data.availability} events={data.events} />
-          <AvailabilityForm selectedDate={localDate(days[0])} onCreated={refresh} />
+          <div className={`week-transition week-transition-${transitionDirection}`} key={weekOffset}>
+            <CalendarGrid
+              user={user}
+              days={days}
+              availability={data.availability}
+              events={data.events}
+              bestSlots={bestSlots}
+              onAvailabilityDraft={setAvailabilityDraft}
+              onReschedule={rescheduleEvent}
+            />
+          </div>
+          <AvailabilityForm selectedDate={localDate(days[0])} onCreated={refresh} compact draft={availabilityDraft} />
           <EventForm games={data.games} friends={data.friends} selectedDate={localDate(days[0])} onSearchGames={searchGames} onCreated={refresh} />
         </div>
         <div className="side-stack">
+          <BestTimePanel slots={bestSlots} onUse={(slot) => setAvailabilityDraft({ date: slot.date, startTime: slot.startTime, endTime: slot.endTime })} />
           <GameRail games={data.games} onSearchGames={searchGames} />
           <EventList user={user} events={data.events} refresh={refresh} />
         </div>
@@ -530,9 +862,12 @@ function FriendsView({ friends, availability, events }) {
           const inviteCount = events.filter((event) => event.invites.some((invite) => invite.userId === friend.id)).length;
           return (
             <article className="friend-row" key={friend.id}>
-              <div>
+              <div className="person-line">
+                <Avatar user={friend} size="small" />
+                <div>
                 <strong>{friend.displayName}</strong>
-                <span>@{friend.username}</span>
+                <span>@{friend.username}{friend.discordUsername ? ` - ${friend.discordUsername}` : ""}</span>
+                </div>
               </div>
               <div><Clock size={16} /> {freeCount} free slots</div>
               <div><Send size={16} /> {inviteCount} invites</div>
@@ -586,6 +921,105 @@ function InvitesView({ user, events, refresh }) {
   );
 }
 
+function EventDetails({ user, event, refresh, onDelete }) {
+  const [expanded, setExpanded] = useState(false);
+  const [comments, setComments] = useState([]);
+  const [comment, setComment] = useState("");
+  const accepted = event.invites.filter((invite) => invite.status === "accepted");
+  const canManage = event.ownerId === user.id || user.role === "admin";
+  const myVote = event.gameOptions.find((option) => option.voters.includes(user.id))?.id;
+
+  async function loadComments() {
+    const payload = await api(`/api/events/${event.id}/comments`);
+    setComments(payload.comments);
+  }
+
+  async function toggleExpanded() {
+    const next = !expanded;
+    setExpanded(next);
+    if (next) await loadComments();
+  }
+
+  async function vote(optionId) {
+    await api(`/api/events/${event.id}/votes`, { method: "POST", body: JSON.stringify({ optionId }) });
+    refresh();
+  }
+
+  async function randomize() {
+    await api(`/api/events/${event.id}/games/randomize`, { method: "POST", body: JSON.stringify({}) });
+    refresh();
+  }
+
+  async function addComment(eventSubmit) {
+    eventSubmit.preventDefault();
+    await api(`/api/events/${event.id}/comments`, { method: "POST", body: JSON.stringify({ body: comment }) });
+    setComment("");
+    loadComments();
+  }
+
+  return (
+    <article className={`event-detail-card${event.ready ? " ready-card" : ""}`}>
+      <div className="event-summary">
+        <div className="event-title-line">
+          <Avatar user={{ displayName: event.ownerName, avatarUrl: event.ownerAvatarUrl, profileColor: event.ownerColor }} size="small" />
+          <div>
+            <strong>{event.title}</strong>
+            <span>{event.gameTitle || "Vote pending"} - {formatDate(event.date)}, {event.startTime} to {event.endTime}</span>
+            <small>Host: {event.ownerName}</small>
+          </div>
+        </div>
+        <div className="capacity-meter">
+          <span>{accepted.length}/{event.maxPlayers} accepted</span>
+          <div><i style={{ width: `${Math.min(100, (accepted.length / event.maxPlayers) * 100)}%` }} /></div>
+          <small>{event.ready ? "Minimum reached" : `${Math.max(0, event.minPlayers - accepted.length)} more needed`}</small>
+        </div>
+        <div className="event-card-actions">
+          <button className="secondary-button" type="button" onClick={toggleExpanded}><MessageSquare size={16} /> {expanded ? "Close" : "Details"}</button>
+          <a className="icon-action" href={`/api/events/${event.id}/ics`} title="Download calendar event"><Download size={17} /></a>
+          {canManage && <button className="danger-button" onClick={() => onDelete(event.id)} aria-label={`Remove ${event.title}`}><Trash2 size={16} /></button>}
+        </div>
+      </div>
+      {expanded && (
+        <div className="event-expanded">
+          <section>
+            <div className="panel-heading"><Vote size={17} /><div><h3>Game vote</h3><p>One vote per invited player.</p></div></div>
+            <div className="vote-grid">
+              {event.gameOptions.map((option) => (
+                <button className={`${myVote === option.id ? "selected" : ""}${option.imageUrl ? " has-image" : ""}`} type="button" onClick={() => vote(option.id)} key={option.id}>
+                  {option.imageUrl && <img src={option.imageUrl} alt="" />}
+                  <span><strong>{option.title}</strong><small>{option.voteCount} vote{option.voteCount === 1 ? "" : "s"}</small></span>
+                  {event.selectedGameOptionId === option.id && <Sparkles size={16} />}
+                </button>
+              ))}
+              {event.gameOptions.length === 0 && <p className="muted">No game options were added.</p>}
+            </div>
+            {canManage && event.gameOptions.length > 0 && (
+              <button className="secondary-button" type="button" onClick={randomize}><Dices size={16} /> Pick winner / break tie</button>
+            )}
+          </section>
+          <section>
+            <div className="panel-heading"><MessageSquare size={17} /><div><h3>Session comments</h3><p>Server details, mods, DLC, and voice chat.</p></div></div>
+            <div className="comment-list">
+              {comments.map((item) => (
+                <div className="comment" key={item.id}>
+                  <Avatar user={item} size="tiny" />
+                  <div><strong>{item.displayName}</strong><p>{item.body}</p><small>{new Date(`${item.createdAt}Z`).toLocaleString()}</small></div>
+                </div>
+              ))}
+              {comments.length === 0 && <p className="muted">No comments yet.</p>}
+            </div>
+            <form className="comment-form" onSubmit={addComment}>
+              <input placeholder="Add a comment" value={comment} onChange={(eventInput) => setComment(eventInput.target.value)} />
+              <button className="primary-button"><Send size={16} /></button>
+            </form>
+          </section>
+          {event.notes && <p className="event-notes"><strong>Session notes:</strong> {event.notes}</p>}
+        </div>
+      )}
+    </article>
+  );
+}
+
 function EventsView({ user, events, refresh }) {
   const managedEvents = events
     .filter((event) => {
@@ -606,35 +1040,12 @@ function EventsView({ user, events, refresh }) {
           <h1>Events</h1>
           <p>Manage sessions you created, accepted, or marked tentative.</p>
         </div>
+        <a className="secondary-button" href="/api/calendar.ics"><Download size={16} /> Export my calendar</a>
       </header>
-      <section className="table-panel">
-        {managedEvents.length === 0 && <p className="muted">No accepted or tentative events yet.</p>}
-        <div className="event-management-list">
-          {managedEvents.map((event) => {
-            const myInvite = event.invites.find((invite) => invite.userId === user.id);
-            const accepted = event.invites.filter((invite) => invite.status === "accepted");
-            const canDelete = event.ownerId === user.id || user.role === "admin";
-            return (
-              <article className="managed-event" key={event.id}>
-                <div>
-                  <strong>{event.title}</strong>
-                  <span>{event.gameTitle || "Game TBD"} - {event.date}, {event.startTime} to {event.endTime}</span>
-                  <small>Owner: {event.ownerName} - Your status: {myInvite?.status || "creator"}</small>
-                </div>
-                <div className="accepted-people">
-                  <span>Accepted</span>
-                  <p>{accepted.map((invite) => invite.displayName).join(", ") || "No one yet"}</p>
-                </div>
-                {canDelete && (
-                  <button className="danger-button" onClick={() => removeEvent(event.id)} aria-label={`Remove ${event.title}`}>
-                    <Trash2 size={16} />
-                  </button>
-                )}
-              </article>
-            );
-          })}
-        </div>
-      </section>
+      {managedEvents.length === 0 && <section className="table-panel"><p className="muted">No accepted or tentative events yet.</p></section>}
+      <div className="event-detail-list">
+        {managedEvents.map((event) => <EventDetails user={user} event={event} refresh={refresh} onDelete={removeEvent} key={event.id} />)}
+      </div>
     </>
   );
 }
@@ -650,7 +1061,10 @@ function GamesView({ games, searchGames }) {
   }
 
   async function suggest(game) {
-    await api("/api/games/suggest", { method: "POST", body: JSON.stringify({ steamAppId: game.appId, title: game.title }) });
+    await api("/api/games/suggest", {
+      method: "POST",
+      body: JSON.stringify({ steamAppId: game.appId, title: game.title, image: game.image || "" })
+    });
   }
 
   return (
@@ -702,29 +1116,258 @@ function GamesView({ games, searchGames }) {
   );
 }
 
+function DashboardView({ dashboard, setActiveView }) {
+  if (!dashboard) {
+    return (
+      <>
+        <header className="topbar"><div><h1>Dashboard</h1><p>Your next session and strongest overlaps.</p></div></header>
+        <div className="dashboard-grid"><section className="table-panel"><Skeleton rows={4} /></section><section className="table-panel"><Skeleton rows={5} /></section></div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <header className="topbar">
+        <div><h1>Dashboard</h1><p>Your next session, invites, and best times to play.</p></div>
+        <button className="secondary-button" onClick={() => setActiveView("tonight")}><Zap size={16} /> Tonight</button>
+      </header>
+      <div className="dashboard-grid">
+        <section className={`dashboard-feature next-event${dashboard.nextEvent?.ready ? " ready-card" : ""}`}>
+          <span className="eyebrow">Next accepted event</span>
+          {dashboard.nextEvent ? (
+            <>
+              <h2>{dashboard.nextEvent.title}</h2>
+              <p>{dashboard.nextEvent.gameTitle || "Game vote pending"}</p>
+              <strong>{formatDate(dashboard.nextEvent.date)} at {dashboard.nextEvent.startTime}</strong>
+              <div className="avatar-stack">
+                {dashboard.nextEvent.invites.filter((invite) => invite.status === "accepted").slice(0, 6).map((invite) => <Avatar user={invite} size="small" key={invite.userId} />)}
+              </div>
+              <button className="primary-button" onClick={() => setActiveView("events")}>Open event</button>
+            </>
+          ) : <><h2>No session booked</h2><p>Use the calendar to create the next one.</p><button className="primary-button" onClick={() => setActiveView("calendar")}>Open calendar</button></>}
+        </section>
+        <section className="table-panel dashboard-panel">
+          <div className="panel-heading"><Bell size={18} /><div><h2>Pending invites</h2><p>{dashboard.pendingInviteCount} waiting for your response.</p></div></div>
+          {dashboard.pendingInvites.map((event) => (
+            <button className="dashboard-row" onClick={() => setActiveView("invites")} key={event.id}>
+              <span><strong>{event.title}</strong><small>{formatDate(event.date)} at {event.startTime}</small></span>
+              <ChevronRight size={17} />
+            </button>
+          ))}
+          {dashboard.pendingInvites.length === 0 && <p className="muted">You are caught up.</p>}
+        </section>
+        <section className="table-panel dashboard-panel">
+          <div className="panel-heading"><Sparkles size={18} /><div><h2>Best upcoming overlap</h2><p>Highest number of free players.</p></div></div>
+          <div className="best-time-list">
+            {dashboard.bestSlots.slice(0, 4).map((slot, index) => (
+              <button onClick={() => setActiveView("calendar")} key={`${slot.date}-${slot.startTime}`}>
+                <span className="rank">{index + 1}</span>
+                <span><strong>{formatDate(slot.date)}</strong><small>{slot.startTime}</small></span>
+                <span className="overlap-count">{slot.count} free</span>
+              </button>
+            ))}
+          </div>
+        </section>
+        <section className="table-panel dashboard-panel">
+          <div className="panel-heading"><Gamepad2 size={18} /><div><h2>Recent suggestions</h2><p>Games your group wants to play.</p></div></div>
+          <div className="suggestion-grid">
+            {dashboard.recentSuggestions.map((game) => (
+              <a href={`https://store.steampowered.com/app/${game.steamAppId}/`} target="_blank" rel="noreferrer" key={game.id}>
+                {game.imageUrl ? <img src={game.imageUrl} alt="" /> : <span className="image-fallback"><Gamepad2 /></span>}
+                <span><strong>{game.title}</strong><small>{game.suggestedBy}</small></span>
+              </a>
+            ))}
+            {dashboard.recentSuggestions.length === 0 && <p className="muted">No games suggested yet.</p>}
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}
+
+function TonightView({ dashboard, setActiveView }) {
+  const tonight = dashboard?.tonight;
+  const currentTime = new Date().toTimeString().slice(0, 5);
+  const available = tonight?.availability.filter((item) => item.endTime > currentTime) || [];
+  const uniquePlayers = [...new Map(available.map((item) => [item.userId, item])).values()];
+
+  return (
+    <>
+      <header className="topbar">
+        <div><h1>Tonight</h1><p>A compact view of who is free and what is planned.</p></div>
+        <button className="secondary-button" onClick={() => setActiveView("calendar")}><CalendarDays size={16} /> Full calendar</button>
+      </header>
+      <div className="tonight-layout">
+        <section className="tonight-hero">
+          <span className="eyebrow">{formatDate(tonight?.date || localDate(new Date()), { weekday: "long", day: "numeric", month: "long" })}</span>
+          <h2>{uniquePlayers.length} player{uniquePlayers.length === 1 ? "" : "s"} free tonight</h2>
+          <div className="tonight-people">
+            {uniquePlayers.map((player) => <div key={player.userId}><Avatar user={player} size="large" /><strong>{player.displayName}</strong><span>{player.startTime}-{player.endTime}</span></div>)}
+          </div>
+          {uniquePlayers.length === 0 && <p>No one has logged remaining free time tonight.</p>}
+        </section>
+        <section className="table-panel">
+          <div className="panel-heading"><Clock size={18} /><div><h2>Tonight sessions</h2><p>Accepted and planned events.</p></div></div>
+          {(tonight?.events || []).map((event) => (
+            <button className="dashboard-row" onClick={() => setActiveView("events")} key={event.id}>
+              <span><strong>{event.title}</strong><small>{event.startTime}-{event.endTime} - {event.gameTitle || "Vote pending"}</small></span>
+              <span>{event.invites.filter((invite) => invite.status === "accepted").length}/{event.maxPlayers}</span>
+            </button>
+          ))}
+          {tonight?.events.length === 0 && <p className="muted">No sessions planned tonight.</p>}
+        </section>
+      </div>
+    </>
+  );
+}
+
+function ProfileView({ user, onSaved }) {
+  const [form, setForm] = useState({ ...user });
+  const [message, setMessage] = useState("");
+
+  async function save(event) {
+    event.preventDefault();
+    const payload = await api("/api/profile", { method: "PUT", body: JSON.stringify(form) });
+    setForm(payload.profile);
+    onSaved(payload.profile);
+    setMessage("Profile saved.");
+  }
+
+  return (
+    <>
+      <header className="topbar"><div><h1>Profile</h1><p>Identity, gaming preferences, timezone, and appearance.</p></div></header>
+      <form className="profile-editor" onSubmit={save}>
+        <section className="profile-preview">
+          <Avatar user={form} size="large" />
+          <h2>{form.displayName}</h2>
+          <span>@{form.username}</span>
+          {form.discordUsername && <p>{form.discordUsername}</p>}
+        </section>
+        <section className="table-panel profile-fields">
+          <div className="two-col">
+            <label>Display name<input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} /></label>
+            <label>Discord username<input value={form.discordUsername} onChange={(event) => setForm({ ...form, discordUsername: event.target.value })} /></label>
+          </div>
+          <label>Avatar HTTPS URL<input value={form.avatarUrl} onChange={(event) => setForm({ ...form, avatarUrl: event.target.value })} /></label>
+          <label>Favourite games<textarea value={form.favoriteGames} onChange={(event) => setForm({ ...form, favoriteGames: event.target.value })} /></label>
+          <div className="two-col">
+            <label>Timezone<input value={form.timezone} onChange={(event) => setForm({ ...form, timezone: event.target.value })} /></label>
+            <label>Profile colour<input type="color" value={form.profileColor} onChange={(event) => setForm({ ...form, profileColor: event.target.value })} /></label>
+          </div>
+          <div className="two-col">
+            <label>Preferred start<input type="time" value={form.preferredStart} onChange={(event) => setForm({ ...form, preferredStart: event.target.value })} /></label>
+            <label>Preferred end<input type="time" value={form.preferredEnd} onChange={(event) => setForm({ ...form, preferredEnd: event.target.value })} /></label>
+          </div>
+          <div className="appearance-row">
+            <label>Theme
+              <select value={form.theme} onChange={(event) => setForm({ ...form, theme: event.target.value })}>
+                <option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option>
+              </select>
+            </label>
+            <label>Accent colour<input type="color" value={form.accent} onChange={(event) => setForm({ ...form, accent: event.target.value })} /></label>
+            <div className="theme-icons">{form.theme === "light" ? <Sun /> : <Moon />}</div>
+          </div>
+          <button className="primary-button"><Settings size={16} /> Save profile</button>
+          {message && <p className="muted">{message}</p>}
+        </section>
+      </form>
+    </>
+  );
+}
+
 function AdminView({ user }) {
   const [users, setUsers] = useState([]);
   const [settings, setSettings] = useState({ appUrl: "", discordWebhookUrl: "", discordBotName: "SquadSlot" });
-  const [message, setMessage] = useState("");
+  const [notifications, setNotifications] = useState([]);
+  const [reminders, setReminders] = useState({
+    eventTomorrow: true,
+    eventStartingSoon: true,
+    rsvpDeadline: true,
+    weeklySummary: true,
+    weeklyDay: 1,
+    weeklyTime: "09:00"
+  });
+  const [message, setMessage] = useState({ type: "", text: "" });
+  const [notificationMessage, setNotificationMessage] = useState({ type: "", text: "" });
   const [backupMessage, setBackupMessage] = useState("");
 
   async function load() {
-    const [usersPayload, settingsPayload] = await Promise.all([api("/api/admin/users"), api("/api/admin/settings")]);
+    const [usersPayload, settingsPayload, notificationsPayload, remindersPayload] = await Promise.all([
+      api("/api/admin/users"),
+      api("/api/admin/settings"),
+      api("/api/admin/notifications"),
+      api("/api/admin/reminders")
+    ]);
     setUsers(usersPayload.users);
     setSettings(settingsPayload.settings);
+    setNotifications(notificationsPayload.notifications);
+    setReminders(remindersPayload.reminders);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load().catch((error) => setMessage({ type: "error", text: error.message }));
+  }, []);
 
   async function saveSettings(event) {
     event.preventDefault();
-    await api("/api/admin/settings", { method: "PUT", body: JSON.stringify(settings) });
-    setMessage("Settings saved.");
+    setMessage({ type: "", text: "" });
+    try {
+      await api("/api/admin/settings", { method: "PUT", body: JSON.stringify(settings) });
+      setMessage({ type: "success", text: "Settings saved." });
+    } catch (error) {
+      setMessage({ type: "error", text: error.message });
+    }
+  }
+
+  async function testDiscord() {
+    setMessage({ type: "", text: "" });
+    try {
+      await api("/api/admin/discord/test", { method: "POST", body: JSON.stringify({}) });
+      setMessage({ type: "success", text: "Discord test message sent." });
+    } catch (error) {
+      setMessage({ type: "error", text: error.message });
+    }
+  }
+
+  function updateNotification(type, patch) {
+    setNotifications((current) => current.map((notification) => (
+      notification.type === type ? { ...notification, ...patch } : notification
+    )));
+  }
+
+  async function saveNotifications(event) {
+    event.preventDefault();
+    setNotificationMessage({ type: "", text: "" });
+    try {
+      const payload = await api("/api/admin/notifications", { method: "PUT", body: JSON.stringify({ notifications }) });
+      setNotifications(payload.notifications);
+      setNotificationMessage({ type: "success", text: "Notification rules saved." });
+    } catch (error) {
+      setNotificationMessage({ type: "error", text: error.message });
+    }
   }
 
   async function setRole(id, role) {
     await api(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify({ role }) });
     load();
+  }
+
+  async function saveReminders(event) {
+    event.preventDefault();
+    setNotificationMessage({ type: "", text: "" });
+    try {
+      const payload = await api("/api/admin/reminders", { method: "PUT", body: JSON.stringify({ reminders }) });
+      setReminders(payload.reminders);
+      setNotificationMessage({ type: "success", text: "Reminder schedule saved." });
+    } catch (error) {
+      setNotificationMessage({ type: "error", text: error.message });
+    }
+  }
+
+  async function runReminders() {
+    await api("/api/admin/reminders/run", { method: "POST", body: JSON.stringify({}) });
+    setNotificationMessage({ type: "success", text: "Reminder check completed." });
   }
 
   async function exportBackup() {
@@ -800,8 +1443,76 @@ function AdminView({ user }) {
             Bot name
             <input value={settings.discordBotName} onChange={(event) => setSettings({ ...settings, discordBotName: event.target.value })} />
           </label>
-          <button className="primary-button"><Settings size={16} /> Save settings</button>
-          {message && <p className="muted">{message}</p>}
+          <div className="settings-actions">
+            <button className="primary-button" type="submit"><Settings size={16} /> Save settings</button>
+            <button className="secondary-button" type="button" onClick={testDiscord}><Send size={16} /> Send test</button>
+          </div>
+          {message.text && <p className={message.type === "error" ? "form-error" : "muted"}>{message.text}</p>}
+        </form>
+        <form className="table-panel admin-form" onSubmit={saveReminders}>
+          <h2>Discord reminders</h2>
+          {[
+            ["eventTomorrow", "Event tomorrow"],
+            ["eventStartingSoon", "Starting in one hour"],
+            ["rsvpDeadline", "RSVP deadline"],
+            ["weeklySummary", "Weekly availability summary"]
+          ].map(([key, label]) => (
+            <label className="toggle-line" key={key}>
+              <input type="checkbox" checked={reminders[key]} onChange={(event) => setReminders({ ...reminders, [key]: event.target.checked })} />
+              <span><strong>{label}</strong></span>
+            </label>
+          ))}
+          <div className="two-col">
+            <label>
+              Weekly day
+              <select value={reminders.weeklyDay} onChange={(event) => setReminders({ ...reminders, weeklyDay: Number(event.target.value) })}>
+                {weekdays.map((day, index) => <option value={index} key={day}>{day}</option>)}
+              </select>
+            </label>
+            <label>Weekly time<input type="time" value={reminders.weeklyTime} onChange={(event) => setReminders({ ...reminders, weeklyTime: event.target.value })} /></label>
+          </div>
+          <div className="settings-actions">
+            <button className="primary-button"><Settings size={16} /> Save reminders</button>
+            <button className="secondary-button" type="button" onClick={runReminders}><Zap size={16} /> Run check now</button>
+          </div>
+        </form>
+        <form className="table-panel admin-form notification-panel" onSubmit={saveNotifications}>
+          <div className="section-title compact-title">
+            <div>
+              <h2>Notification rules</h2>
+              <p>Choose Discord posts and edit message templates with variables.</p>
+            </div>
+            <button className="primary-button" type="submit"><Bell size={16} /> Save rules</button>
+          </div>
+          <div className="notification-list">
+            {notifications.map((notification) => (
+              <article className="notification-row" key={notification.type}>
+                <label className="toggle-line">
+                  <input
+                    type="checkbox"
+                    checked={notification.enabled}
+                    onChange={(event) => updateNotification(notification.type, { enabled: event.target.checked })}
+                  />
+                  <span>
+                    <strong>{notification.label}</strong>
+                    <small>{notification.description}</small>
+                  </span>
+                </label>
+                <div className="template-grid">
+                  <label>
+                    Title
+                    <input value={notification.title} onChange={(event) => updateNotification(notification.type, { title: event.target.value })} />
+                  </label>
+                  <label>
+                    Message
+                    <textarea value={notification.message} onChange={(event) => updateNotification(notification.type, { message: event.target.value })} />
+                  </label>
+                </div>
+                <small className="template-vars">Variables: {notification.variables.map((variable) => `{${variable}}`).join(", ")}</small>
+              </article>
+            ))}
+          </div>
+          {notificationMessage.text && <p className={notificationMessage.type === "error" ? "form-error" : "muted"}>{notificationMessage.text}</p>}
         </form>
         <section className="table-panel admin-form">
           <h2>Backup and restore</h2>
@@ -820,10 +1531,11 @@ function AdminView({ user }) {
 
 function App() {
   const [user, setUser] = useState(null);
-  const [activeView, setActiveView] = useState("calendar");
+  const [activeView, setActiveView] = useState("dashboard");
   const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
-  const [data, setData] = useState({ availability: [], events: [], games: [], friends: [] });
+  const [data, setData] = useState({ availability: [], events: [], games: [], friends: [], dashboard: null });
 
   const searchGames = useCallback(async (query = "co-op") => {
     try {
@@ -835,15 +1547,25 @@ function App() {
   }, []);
 
   const refresh = useCallback(async () => {
+    setDataLoading(true);
     try {
-      const [availability, events, friends] = await Promise.all([
+      const [availability, events, friends, dashboard] = await Promise.all([
         api("/api/availability"),
         api("/api/events"),
-        api("/api/friends")
+        api("/api/friends"),
+        api("/api/dashboard")
       ]);
-      setData((current) => ({ ...current, availability: availability.availability, events: events.events, friends: friends.users }));
+      setData((current) => ({
+        ...current,
+        availability: availability.availability,
+        events: events.events,
+        friends: friends.users,
+        dashboard: dashboard.dashboard
+      }));
     } catch {
       // Keep the signed-in shell usable if a secondary data request fails.
+    } finally {
+      setDataLoading(false);
     }
   }, []);
 
@@ -859,6 +1581,15 @@ function App() {
       searchGames();
     }
   }, [user, refresh, searchGames]);
+
+  useEffect(() => {
+    if (!user) return;
+    const preferredTheme = user.theme === "system"
+      ? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")
+      : user.theme;
+    document.documentElement.dataset.theme = preferredTheme || "dark";
+    document.documentElement.style.setProperty("--accent", user.accent || "#2fd3ba");
+  }, [user]);
 
   async function logout() {
     await api("/api/auth/logout", { method: "POST" });
@@ -880,16 +1611,24 @@ function App() {
           <Bell size={18} />
           {pendingInviteCount > 0 && <span>{pendingInviteCount}</span>}
         </button>
+        {activeView === "dashboard" && <DashboardView dashboard={data.dashboard} setActiveView={setActiveView} />}
         {activeView === "calendar" && <CalendarView user={user} data={data} weekOffset={weekOffset} setWeekOffset={setWeekOffset} refresh={refresh} searchGames={searchGames} />}
+        {activeView === "tonight" && <TonightView dashboard={data.dashboard} setActiveView={setActiveView} />}
         {activeView === "events" && <EventsView user={user} events={data.events} refresh={refresh} />}
         {activeView === "invites" && <InvitesView user={user} events={data.events} refresh={refresh} />}
         {activeView === "free-time" && <FreeTimeView user={user} availability={data.availability} refresh={refresh} />}
         {activeView === "friends" && <FriendsView friends={data.friends} availability={data.availability} events={data.events} />}
         {activeView === "games" && <GamesView games={data.games} searchGames={searchGames} />}
+        {activeView === "profile" && <ProfileView user={user} onSaved={setUser} />}
         {activeView === "admin" && user.role === "admin" && <AdminView user={user} />}
+        {dataLoading && activeView !== "dashboard" && <div className="loading-indicator"><span /></div>}
       </main>
     </div>
   );
 }
 
 createRoot(document.getElementById("root")).render(<App />);
+
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+}

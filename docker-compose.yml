@@ -8,6 +8,7 @@ services:
     environment:
       PORT: 8080
       DATABASE_PATH: /data/squadslot.db
+      TZ: ${TZ:-Europe/London}
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in a .env file before starting SquadSlot}
       APP_URL: ${APP_URL:-http://localhost:8080}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
@@ -15,6 +16,12 @@ services:
       TRUST_PROXY: ${TRUST_PROXY:-0}
     volumes:
       - squadslot-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 volumes:
   squadslot-data:

@@ -7,15 +7,22 @@ SquadSlot is a self-hosted gaming calendar for friend groups. It helps a squad s
 - Account registration and login with signed HTTP-only cookies
 - First registered account automatically becomes the admin
 - Shared weekly calendar with previous/next week navigation
-- Availability logging
+- Dashboard and Tonight mode
+- Availability logging, recurring weekly rules, date exceptions, and presets
+- Best-time finder with overlap highlighting
 - Steam-backed game search and game detail lookup
-- Session creation with friend invites
+- Session creation with friend invites and player capacity
+- Multi-game voting with random tie resolution
+- Event comments and calendar export
 - Invite responses: accept, tentative, decline
 - Events page for created, accepted, and tentative sessions
+- Profiles with avatars, timezone, Discord username, preferences, themes, and accent colours
 - Admin-only account role management
 - Admin-managed Discord webhook settings
+- Configurable Discord reminders and weekly summaries
 - Admin JSON backup and restore
 - Optional Discord channel updates
+- Installable PWA for desktop and mobile home screens
 - Single Docker container with SQLite persistence
 
 ## Quick Start With Docker
@@ -40,6 +47,19 @@ SQLite data is stored in the `squadslot-data` Docker volume at:
 /data/squadslot.db
 ```
 
+If the container keeps restarting, check the startup error first:
+
+```bash
+docker compose ps
+docker compose logs --tail=120 squadslot
+```
+
+Common causes are:
+
+- `SESSION_SECRET` is missing or shorter than 32 characters in `.env`.
+- A host bind mount is being used for `/data` and the container cannot write to it. Either use the included named volume or make the host folder writable by the container user.
+- `APP_URL` does not match the public URL when running behind a reverse proxy.
+
 ## First Login
 
 No demo users are created.
@@ -53,6 +73,7 @@ Before exposing the app publicly, set these values in `.env`:
 ```bash
 SESSION_SECRET=replace-with-a-long-random-secret-at-least-32-characters
 APP_URL=https://calendar.yourdomain.com
+TZ=Europe/London
 ```
 
 Use a long random value for `SESSION_SECRET`. The container will refuse to start in production if the secret is missing or too short.
@@ -70,9 +91,16 @@ SquadSlot can post updates to a Discord channel through a webhook. This does not
 Events that can post to Discord:
 
 - availability added
+- availability removed
 - game suggested
 - session invite created
+- invite response changed
+- session reaches its minimum player count
 - session removed
+- event tomorrow
+- event starting in one hour
+- RSVP deadline
+- weekly availability summary
 
 Create a webhook in Discord:
 
@@ -89,7 +117,7 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/your-webhook-url
 DISCORD_BOT_NAME=SquadSlot
 ```
 
-Or sign in as an admin and save it from the Admin page.
+Or sign in as an admin and save it from the Admin page. The Admin page also has a `Send test` button and notification rules for choosing which Discord updates are posted. Each notification has editable title/message templates with variables such as `{actor}`, `{date}`, `{title}`, `{game}`, and `{status}`.
 
 ## Local Development
 
@@ -103,6 +131,12 @@ Run the frontend and API together:
 
 ```bash
 npm run dev
+```
+
+Run the admin settings smoke test:
+
+```bash
+npm test
 ```
 
 The Vite frontend runs on:
@@ -166,10 +200,16 @@ The backup includes:
 - accounts
 - bcrypt password hashes, not plaintext passwords
 - availability/free-time entries
+- recurring availability rules, exceptions, and presets
 - events
 - invite responses
+- event game options, votes, comments, and capacity
+- profiles and appearance preferences
+- recent game suggestions
 - app settings
 - Discord webhook configuration
+- Discord notification rules
+- reminder delivery history
 
 Because password hashes are included, restored users can keep signing in with their existing passwords. Store backup files privately, especially if they contain a Discord webhook URL.
 

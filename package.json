@@ -8,6 +8,9 @@
     "build": "vite build",
     "start": "cross-env NODE_ENV=production node server/index.js",
     "lint": "eslint .",
+    "test": "npm run test:admin-settings && npm run test:features",
+    "test:admin-settings": "node scripts/admin-settings-smoke.mjs",
+    "test:features": "node scripts/features-smoke.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {

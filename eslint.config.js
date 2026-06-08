@@ -18,9 +18,11 @@ export default [
         URL: "readonly",
         document: "readonly",
         fetch: "readonly",
+        navigator: "readonly",
         React: "readonly",
         setTimeout: "readonly",
-        clearTimeout: "readonly"
+        clearTimeout: "readonly",
+        window: "readonly"
       }
     },
     settings: { react: { version: "detect" } },
@@ -43,7 +45,34 @@ export default [
         console: "readonly",
         fetch: "readonly",
         process: "readonly",
+        setInterval: "readonly",
         setTimeout: "readonly",
+        URL: "readonly"
+      }
+    }
+  },
+  {
+    files: ["scripts/**/*.{js,mjs}"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: {
+        console: "readonly",
+        fetch: "readonly",
+        process: "readonly",
+        setTimeout: "readonly"
+      }
+    }
+  },
+  {
+    files: ["public/service-worker.js"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "script",
+      globals: {
+        caches: "readonly",
+        fetch: "readonly",
+        self: "readonly",
         URL: "readonly"
       }
     }

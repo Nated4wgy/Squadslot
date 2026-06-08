@@ -1,0 +1,21 @@
+{
+  "name": "SquadSlot",
+  "short_name": "SquadSlot",
+  "description": "Shared gaming availability, event planning, voting, and Discord reminders.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#111415",
+  "theme_color": "#2fd3ba",
+  "icons": [
+    {
+      "src": "/squadslot-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/squadslot-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
