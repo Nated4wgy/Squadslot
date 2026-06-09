@@ -9,6 +9,8 @@ Significant SquadSlot changes are recorded here by release date.
 - Added private live calendar subscriptions for Apple Calendar, Google Calendar, and Outlook.
 - Added per-account subscription generation, copy, subscribe, regeneration, and revocation controls.
 - Added stable calendar event identifiers, modification timestamps, confirmed/tentative status, and refresh metadata.
+- Added free-time entries to downloaded and subscribed calendars.
+- Added privacy-filtered overlap entries that name other players only when they are free during the subscriber's own availability.
 - Added multi-day drag selection for recurring weekly availability.
 - Added an explicit Once/Weekly availability composer with weekday selection.
 - Added Tomorrow evening, Weeknights, Saturday night, and Weekend evening quick presets.
@@ -19,6 +21,8 @@ Significant SquadSlot changes are recorded here by release date.
 - Multiple free players are grouped into one calendar slot with names and hover details.
 - Recurring rules can be created for several weekdays in one operation.
 - Accepted and tentative sessions update live calendar feeds after rescheduling or RSVP changes.
+- Accepted and tentative event times are removed from calendar-feed availability for committed players.
+- Recurring availability is expanded into dated entries in live calendar feeds.
 - Live calendar subscription hashes are included in admin backups and restores.
 - Steam images now load correctly while the PWA service worker is active.
 - Improved availability controls across desktop and mobile layouts.

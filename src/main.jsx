@@ -1507,7 +1507,7 @@ function ProfileView({ user, onSaved }) {
             <RefreshCw size={18} />
             <div>
               <h2>Live calendar subscription</h2>
-              <p>Accepted and tentative events update through a private calendar feed.</p>
+              <p>Events, your free time, and matching availability update through a private calendar feed.</p>
             </div>
             <span className={`subscription-state${subscription.active ? " active" : ""}`}>
               {subscription.active ? "Active" : "Off"}

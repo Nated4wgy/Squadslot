@@ -136,7 +136,13 @@ When several users are free, the calendar groups them into one entry and shows t
 
 ## Live Calendar Subscriptions
 
-Each account can generate a private feed from **Profile > Live calendar subscription**. Accepted and tentative events are published through a stable `.ics` URL.
+Each account can generate a private feed from **Profile > Live calendar subscription**. The stable `.ics` URL includes:
+
+- Accepted and tentative events
+- The account owner's free-time entries
+- Other users' names only for the exact periods when they overlap the account owner's free time
+
+Accepted or tentative event time is removed from availability before the feed is generated. Other users' unrelated availability is never included.
 
 - Apple Calendar: use **Subscribe** or add the `webcal://` URL.
 - Google Calendar: choose **Other calendars > From URL** and paste the HTTPS URL.
@@ -144,7 +150,7 @@ Each account can generate a private feed from **Profile > Live calendar subscrip
 
 SquadSlot requests a 15-minute refresh, but each provider controls its actual polling schedule. Google Calendar may take substantially longer to show changes.
 
-The subscription URL is a bearer credential. Anyone with the URL can read that user's accepted and tentative events. Regenerate or revoke the link immediately if it is exposed.
+The subscription URL is a bearer credential. Anyone with the URL can read that user's events, free time, and matching availability. Regenerate or revoke the link immediately if it is exposed.
 
 ## Discord Integration
 

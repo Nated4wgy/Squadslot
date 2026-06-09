@@ -25,7 +25,7 @@ export function expandAvailability(startDate, endDate) {
     .prepare(`
       SELECT a.id, a.user_id AS userId, u.display_name AS displayName, u.avatar_url AS avatarUrl,
              u.profile_color AS profileColor, a.date, a.start_time AS startTime,
-             a.end_time AS endTime, a.note, 0 AS recurring
+             a.end_time AS endTime, a.note, a.created_at AS createdAt, 0 AS recurring
       FROM availability a
       JOIN users u ON u.id = a.user_id
       WHERE a.date BETWEEN ? AND ?
@@ -37,7 +37,7 @@ export function expandAvailability(startDate, endDate) {
       SELECT r.id AS ruleId, r.user_id AS userId, u.display_name AS displayName,
              u.avatar_url AS avatarUrl, u.profile_color AS profileColor, r.weekday,
              r.start_time AS startTime, r.end_time AS endTime, r.note,
-             r.start_date AS startDate, r.end_date AS endDate
+             r.start_date AS startDate, r.end_date AS endDate, r.created_at AS createdAt
       FROM availability_rules r
       JOIN users u ON u.id = r.user_id
       WHERE r.start_date <= ? AND (r.end_date IS NULL OR r.end_date = '' OR r.end_date >= ?)
@@ -66,6 +66,7 @@ export function expandAvailability(startDate, endDate) {
         startTime: rule.startTime,
         endTime: rule.endTime,
         note: rule.note,
+        createdAt: rule.createdAt,
         recurring: 1
       });
     }
@@ -139,6 +140,11 @@ function icsTimestamp(value) {
   return date.toISOString().replaceAll("-", "").replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
 }
 
+function availabilityUid(item) {
+  return String(item.uid || item.id || `${item.date}-${item.startTime}-${item.endTime}`)
+    .replace(/[^A-Za-z0-9_.-]/g, "-");
+}
+
 export function eventsToIcs(events, calendarName = "SquadSlot", options = {}) {
   const lines = [
     "BEGIN:VCALENDAR",
@@ -168,6 +174,25 @@ export function eventsToIcs(events, calendarName = "SquadSlot", options = {}) {
       "END:VEVENT"
     );
   }
+
+  for (const item of options.availability || []) {
+    const timestamp = icsTimestamp(item.createdAt || `${item.date} 00:00:00`);
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:squadslot-${item.kind}-${availabilityUid(item)}@squadslot`,
+      `DTSTAMP:${timestamp}`,
+      `LAST-MODIFIED:${timestamp}`,
+      `DTSTART:${icsDateTime(item.date, item.startTime)}`,
+      `DTEND:${icsDateTime(item.date, item.endTime)}`,
+      `SUMMARY:${icsEscape(item.summary)}`,
+      `DESCRIPTION:${icsEscape(item.description)}`,
+      "STATUS:CONFIRMED",
+      "TRANSP:TRANSPARENT",
+      `CATEGORIES:${item.kind === "overlap" ? "SquadSlot\\,Availability\\,Overlap" : "SquadSlot\\,Availability"}`,
+      "END:VEVENT"
+    );
+  }
+
   lines.push("END:VCALENDAR");
   return `${lines.join("\r\n")}\r\n`;
 }

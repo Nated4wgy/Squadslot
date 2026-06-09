@@ -120,6 +120,8 @@ async function main() {
     const friendId = result.payload.user.id;
     const freeDate = dateAfter(1);
     const eventDate = dateAfter(2);
+    const recurringDate = dateAfter(8);
+    const unrelatedDate = dateAfter(10);
 
     for (const [cookie, note] of [[adminCookie, "Admin free"], [friendCookie, "Friend free"]]) {
       result = await request("/api/availability", cookie, {
@@ -128,6 +130,31 @@ async function main() {
       });
       assert(result.response.status === 201, "Availability creation failed.");
     }
+
+    result = await request("/api/availability", friendCookie, {
+      method: "POST",
+      body: JSON.stringify({ date: eventDate, startTime: "19:00", endTime: "23:00", note: "Around the event" })
+    });
+    assert(result.response.status === 201, "Availability around an event failed.");
+
+    result = await request("/api/availability", adminCookie, {
+      method: "POST",
+      body: JSON.stringify({ date: unrelatedDate, startTime: "18:00", endTime: "20:00", note: "Private unrelated time" })
+    });
+    assert(result.response.status === 201, "Unrelated availability creation failed.");
+
+    result = await request("/api/availability/recurring", friendCookie, {
+      method: "POST",
+      body: JSON.stringify({
+        weekday: new Date(`${recurringDate}T00:00:00Z`).getUTCDay(),
+        startTime: "18:00",
+        endTime: "19:00",
+        startDate: recurringDate,
+        endDate: recurringDate,
+        note: "Recurring feed test"
+      })
+    });
+    assert(result.response.status === 201, "Recurring feed availability creation failed.");
 
     result = await request("/api/availability/best-times", adminCookie, { method: "GET" });
     assert(result.response.ok && result.payload.slots.some((slot) => slot.count === 2), "Best-time overlap was not calculated.");
@@ -218,6 +245,32 @@ async function main() {
       && result.payload.includes(`UID:squadslot-${eventId}@squadslot`)
       && result.payload.includes("STATUS:CONFIRMED"),
       "Live calendar feed did not include the accepted event."
+    );
+    assert(
+      result.payload.includes("SUMMARY:Free to play")
+      && result.payload.includes("SUMMARY:Also free: Admin")
+      && result.payload.includes(`DTSTART:${freeDate.replaceAll("-", "")}T190000`)
+      && result.payload.includes(`DTSTART:${recurringDate.replaceAll("-", "")}T180000`),
+      "Live calendar feed did not include own or overlapping availability."
+    );
+    assert(
+      !result.payload.includes(unrelatedDate.replaceAll("-", "")),
+      "Live calendar feed exposed another user's unrelated availability."
+    );
+    assert(
+      result.payload.includes(`DTSTART:${eventDate.replaceAll("-", "")}T190000\r\nDTEND:${eventDate.replaceAll("-", "")}T200000`)
+      && result.payload.includes(`DTSTART:${eventDate.replaceAll("-", "")}T220000\r\nDTEND:${eventDate.replaceAll("-", "")}T230000`)
+      && !result.payload.includes(`DTSTART:${eventDate.replaceAll("-", "")}T190000\r\nDTEND:${eventDate.replaceAll("-", "")}T230000`),
+      "Committed events did not remove their time from calendar availability."
+    );
+
+    result = await request("/api/calendar.ics", friendCookie);
+    assert(
+      result.response.ok
+      && result.payload.includes("SUMMARY:Free to play")
+      && result.payload.includes("SUMMARY:Also free: Admin")
+      && !result.payload.includes(unrelatedDate.replaceAll("-", "")),
+      "Downloaded calendar did not apply availability overlap privacy."
     );
 
     result = await request(`/api/events/${eventId}`, adminCookie, {

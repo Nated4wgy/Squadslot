@@ -583,6 +583,170 @@ function calendarEventsForUser(userId) {
   });
 }
 
+function timeToMinutes(value) {
+  const [hours, minutes] = value.split(":").map(Number);
+  return (hours * 60) + minutes;
+}
+
+function minutesToTime(value) {
+  const clamped = Math.max(0, Math.min((23 * 60) + 59, value));
+  return `${String(Math.floor(clamped / 60)).padStart(2, "0")}:${String(clamped % 60).padStart(2, "0")}`;
+}
+
+function subtractCommittedTime(item, committed) {
+  let segments = [[timeToMinutes(item.startTime), timeToMinutes(item.endTime)]];
+  for (const blocker of committed.filter((entry) => entry.date === item.date)) {
+    const blockStart = timeToMinutes(blocker.startTime);
+    const blockEnd = timeToMinutes(blocker.endTime);
+    segments = segments.flatMap(([start, end]) => {
+      if (blockEnd <= start || blockStart >= end) return [[start, end]];
+      const remainder = [];
+      if (blockStart > start) remainder.push([start, Math.min(blockStart, end)]);
+      if (blockEnd < end) remainder.push([Math.max(blockEnd, start), end]);
+      return remainder;
+    });
+  }
+
+  return segments
+    .filter(([start, end]) => start < end)
+    .map(([start, end]) => ({
+      ...item,
+      startMinutes: start,
+      endMinutes: end,
+      startTime: minutesToTime(start),
+      endTime: minutesToTime(end)
+    }));
+}
+
+function mergeAvailabilitySegments(items) {
+  const grouped = new Map();
+  for (const item of items) {
+    const key = `${item.userId}:${item.date}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(item);
+  }
+
+  const merged = [];
+  for (const entries of grouped.values()) {
+    entries.sort((a, b) => a.startMinutes - b.startMinutes || a.endMinutes - b.endMinutes);
+    for (const item of entries) {
+      const previous = merged.at(-1);
+      if (
+        previous
+        && previous.userId === item.userId
+        && previous.date === item.date
+        && item.startMinutes <= previous.endMinutes
+      ) {
+        previous.endMinutes = Math.max(previous.endMinutes, item.endMinutes);
+        previous.endTime = minutesToTime(previous.endMinutes);
+        previous.notes = [...new Set([...previous.notes, item.note].filter(Boolean))];
+        if (item.createdAt && (!previous.createdAt || item.createdAt < previous.createdAt)) previous.createdAt = item.createdAt;
+      } else {
+        merged.push({
+          ...item,
+          notes: item.note ? [item.note] : []
+        });
+      }
+    }
+  }
+  return merged;
+}
+
+function calendarAvailabilityForUser(userId, startDate, endDate) {
+  const availability = expandAvailability(startDate, endDate);
+  const committedByUser = new Map();
+
+  function commit(user, event) {
+    if (!committedByUser.has(user)) committedByUser.set(user, []);
+    committedByUser.get(user).push({
+      date: event.date,
+      startTime: event.startTime,
+      endTime: event.endTime
+    });
+  }
+
+  for (const event of eventRows().filter((item) => item.date >= startDate && item.date <= endDate)) {
+    commit(event.ownerId, event);
+    for (const invite of event.invites) {
+      if (["accepted", "tentative"].includes(invite.status)) commit(invite.userId, event);
+    }
+  }
+
+  const usable = availability.flatMap((item) => (
+    subtractCommittedTime(item, committedByUser.get(item.userId) || [])
+  ));
+  const merged = mergeAvailabilitySegments(usable);
+  const mine = merged.filter((item) => item.userId === userId);
+  const others = merged.filter((item) => item.userId !== userId);
+  const feedItems = mine.map((item) => ({
+    kind: "free",
+    uid: `${userId}-${item.date}-${item.startTime}-${item.endTime}`,
+    date: item.date,
+    startTime: item.startTime,
+    endTime: item.endTime,
+    createdAt: item.createdAt,
+    summary: "Free to play",
+    description: item.notes.length
+      ? `Your SquadSlot availability. ${item.notes.join(" / ")}`
+      : "Your SquadSlot availability."
+  }));
+
+  for (const own of mine) {
+    const candidates = others.filter((item) => (
+      item.date === own.date
+      && item.startMinutes < own.endMinutes
+      && item.endMinutes > own.startMinutes
+    ));
+    const boundaries = new Set([own.startMinutes, own.endMinutes]);
+    for (const item of candidates) {
+      boundaries.add(Math.max(own.startMinutes, item.startMinutes));
+      boundaries.add(Math.min(own.endMinutes, item.endMinutes));
+    }
+    const ordered = [...boundaries].sort((a, b) => a - b);
+    const windows = [];
+
+    for (let index = 0; index < ordered.length - 1; index += 1) {
+      const start = ordered[index];
+      const end = ordered[index + 1];
+      const players = new Map();
+      for (const item of candidates) {
+        if (item.startMinutes < end && item.endMinutes > start) {
+          players.set(item.userId, item.displayName);
+        }
+      }
+      if (players.size === 0) continue;
+
+      const ids = [...players.keys()].sort((a, b) => a - b);
+      const names = ids.map((id) => players.get(id));
+      const previous = windows.at(-1);
+      if (previous && previous.end === start && previous.ids.join(",") === ids.join(",")) {
+        previous.end = end;
+      } else {
+        windows.push({ start, end, ids, names });
+      }
+    }
+
+    for (const window of windows) {
+      const startTime = minutesToTime(window.start);
+      const endTime = minutesToTime(window.end);
+      feedItems.push({
+        kind: "overlap",
+        uid: `${userId}-${own.date}-${startTime}-${endTime}-${window.ids.join("-")}`,
+        date: own.date,
+        startTime,
+        endTime,
+        createdAt: own.createdAt,
+        summary: `Also free: ${window.names.join(", ")}`,
+        description: `${window.names.join(", ")} ${window.names.length === 1 ? "is" : "are"} also free during your SquadSlot availability.`
+      });
+    }
+  }
+
+  return feedItems.sort((a, b) => (
+    `${a.date} ${a.startTime} ${a.kind}`.localeCompare(`${b.date} ${b.startTime} ${b.kind}`)
+  ));
+}
+
 async function announceReadyIfNeeded(eventId) {
   const event = eventRows("WHERE e.id = ?", [eventId])[0];
   if (!event || event.readyAnnounced || !event.ready) return;
@@ -1151,9 +1315,11 @@ app.get("/api/events/:id/ics", requireAuth, (req, res) => {
 
 app.get("/api/calendar.ics", requireAuth, (req, res) => {
   const events = calendarEventsForUser(req.user.id);
+  const today = dateString(new Date());
+  const availability = calendarAvailabilityForUser(req.user.id, addDateDays(today, -7), addDateDays(today, 120));
   res.setHeader("Content-Type", "text/calendar; charset=utf-8");
   res.setHeader("Content-Disposition", 'attachment; filename="squadslot-calendar.ics"');
-  res.send(eventsToIcs(events, `${req.user.display_name} - SquadSlot`));
+  res.send(eventsToIcs(events, `${req.user.display_name} - SquadSlot`, { availability }));
 });
 
 app.get("/calendar/:token.ics", (req, res) => {
@@ -1172,11 +1338,17 @@ app.get("/calendar/:token.ics", (req, res) => {
     .run(subscription.userId);
   const sourceUrl = calendarSubscriptionUrls(req, token).httpsUrl;
   const events = calendarEventsForUser(subscription.userId);
+  const today = dateString(new Date());
+  const availability = calendarAvailabilityForUser(
+    subscription.userId,
+    addDateDays(today, -7),
+    addDateDays(today, 120)
+  );
   res.setHeader("Content-Type", "text/calendar; charset=utf-8");
   res.setHeader("Content-Disposition", 'inline; filename="squadslot-live.ics"');
   res.setHeader("Cache-Control", "private, no-cache, max-age=0");
   res.setHeader("X-Robots-Tag", "noindex, nofollow");
-  res.send(eventsToIcs(events, `${subscription.displayName} - SquadSlot`, { sourceUrl }));
+  res.send(eventsToIcs(events, `${subscription.displayName} - SquadSlot`, { sourceUrl, availability }));
 });
 
 app.delete("/api/events/:id", requireAuth, async (req, res) => {
