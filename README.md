@@ -1,232 +1,311 @@
 # SquadSlot
 
-SquadSlot is a self-hosted gaming calendar for friend groups. It helps a squad share availability, search Steam for games, create session invites, respond to invites, and post updates into Discord.
+<p align="center">
+  <img src="public/squadslot-logo.png" alt="SquadSlot" width="420">
+</p>
 
-## Features
+SquadSlot is a self-hosted gaming calendar for friend groups. Share free time, find the best overlap, arrange sessions, vote on games, manage invitations, post Discord updates, and subscribe from a phone calendar.
 
-- Account registration and login with signed HTTP-only cookies
-- First registered account automatically becomes the admin
-- Shared weekly calendar with previous/next week navigation
-- Dashboard and Tonight mode
-- One-off and recurring availability with multi-day drag selection, date exceptions, and quick presets
-- Best-time finder with overlap highlighting
-- Steam-backed game search and game detail lookup
-- Session creation with friend invites and player capacity
-- Multi-game voting with random tie resolution
-- Event comments, one-off calendar export, and private live calendar subscriptions
-- Invite responses: accept, tentative, decline
-- Events page for created, accepted, and tentative sessions
-- Profiles with avatars, timezone, Discord username, preferences, themes, and accent colours
-- Admin-only account role management
-- Admin-managed Discord webhook settings
-- Configurable Discord reminders and weekly summaries
-- Admin JSON backup and restore
-- Optional Discord channel updates
+![SquadSlot dashboard](docs/screenshots/dashboard.png)
+
+## Highlights
+
+- Shared weekly calendar with grouped availability and event details
+- One-off or recurring availability with multi-day drag selection
+- Best-time finder that ranks the strongest player overlap
+- Event invitations with accepted, tentative, and declined responses
+- Minimum and maximum player capacity with ready-state notifications
+- Multiple game options, invitee voting, and random tie resolution
+- Steam search-as-you-type with game artwork and details
+- Event comments for servers, mods, DLC, and plan changes
+- Private live calendar subscriptions for Apple Calendar, Google Calendar, and Outlook
+- Discord webhook updates, reminders, editable templates, and test delivery
+- User profiles, colours, timezones, preferred hours, themes, and avatars
+- Admin account management plus JSON backup and restore
 - Installable PWA for desktop and mobile home screens
-- Single Docker container with SQLite persistence
+
+![SquadSlot shared calendar](docs/screenshots/calendar.png)
+
+## How It Works
+
+1. The first registered account becomes the administrator.
+2. Friends create their own normal accounts.
+3. Everyone logs one-off or recurring free time.
+4. SquadSlot highlights the strongest shared times.
+5. A user creates an event, suggests games, and invites players.
+6. Invitees respond, vote, comment, and optionally subscribe from their phone calendar.
+
+No demo accounts or default passwords are created.
 
 ## Quick Start With Docker
 
-Clone or copy the project onto your server, then from the project folder run:
+Requirements:
+
+- Docker Engine
+- Docker Compose v2
+- A writable Docker volume or host directory for SQLite
+
+Clone the repository and create the deployment environment file:
+
+```bash
+git clone https://github.com/Nated4wgy/Squadslot.git
+cd Squadslot
+cp .env.example .env
+nano .env
+```
+
+Set at least:
+
+```env
+SESSION_SECRET=replace-with-a-long-random-secret-at-least-32-characters
+APP_URL=https://calendar.example.com
+TZ=Europe/London
+TRUST_PROXY=1
+```
+
+Generate a suitable secret with:
+
+```bash
+openssl rand -hex 32
+```
+
+Build and start SquadSlot:
+
+```bash
+docker compose up -d --build
+```
+
+Open the configured HTTPS address:
+
+```text
+https://calendar.example.com
+```
+
+The included Compose file stores SQLite data in the `squadslot-data` named volume, mounted inside the container at `/data`.
+
+For a same-machine development test, set `APP_URL=http://localhost:8080`, set `TRUST_PROXY=0`, and open `http://localhost:8080`. Use HTTPS for access from other devices.
+
+## Hosting From Copied Files
+
+Git is not required on the server. Copy the complete project folder to the server, excluding local-only folders such as `node_modules`, `dist`, and `data`, then run:
 
 ```bash
 cp .env.example .env
 nano .env
-docker compose up --build -d
+docker compose up -d --build
 ```
 
-SquadSlot will be available at:
+Keep `docker-compose.yml`, `Dockerfile`, `package.json`, `package-lock.json`, `server`, `src`, and `public` together in the same project directory.
 
-```text
-http://localhost:8080
+## Domain And HTTPS
+
+Point your domain at the server and reverse proxy it to port `8080`. The public URL in `APP_URL` must exactly match the HTTPS address users open.
+
+Example Caddy configuration:
+
+```caddy
+calendar.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
 ```
 
-SQLite data is stored in the `squadslot-data` Docker volume at:
+Recommended environment:
 
-```text
-/data/squadslot.db
-```
-
-If the container keeps restarting, check the startup error first:
-
-```bash
-docker compose ps
-docker compose logs --tail=120 squadslot
-```
-
-Common causes are:
-
-- `SESSION_SECRET` is missing or shorter than 32 characters in `.env`.
-- A host bind mount is being used for `/data` and the container cannot write to it. Either use the included named volume or make the host folder writable by the container user.
-- `APP_URL` does not match the public URL when running behind a reverse proxy.
-
-## First Login
-
-No demo users are created.
-
-Open the site and create the first account. That first account becomes the admin automatically. Later users are normal users unless an admin promotes them.
-
-## Required Production Settings
-
-Before exposing the app publicly, set these values in `.env`:
-
-```bash
-SESSION_SECRET=replace-with-a-long-random-secret-at-least-32-characters
-APP_URL=https://calendar.yourdomain.com
-TZ=Europe/London
-```
-
-Use a long random value for `SESSION_SECRET`. The container will refuse to start in production if the secret is missing or too short.
-
-If SquadSlot is behind a reverse proxy such as Nginx, Caddy, Cloudflare Tunnel, or Traefik, set:
-
-```bash
+```env
+APP_URL=https://calendar.example.com
 TRUST_PROXY=1
 ```
 
-## Discord Updates
+HTTPS is strongly recommended because SquadSlot uses secure session cookies in production, provides PWA installation, and generates public subscription URLs from `APP_URL`.
 
-SquadSlot can post updates to a Discord channel through a webhook. This does not require a full Discord bot token or gateway process.
+## First Login
 
-Events that can post to Discord:
+Open SquadSlot and create the first account. It automatically receives the `admin` role. Later registrations are normal user accounts unless an administrator promotes them from the Admin page.
 
-- availability added
-- availability removed
-- game suggested
-- session invite created
-- invite response changed
-- session reaches its minimum player count
-- session removed
-- event tomorrow
-- event starting in one hour
-- RSVP deadline
-- weekly availability summary
+## Availability And Scheduling
 
-Create a webhook in Discord:
+Availability can be added in several ways:
 
-1. Open the target Discord channel.
-2. Choose `Edit Channel`.
-3. Open `Integrations`.
-4. Create a webhook.
-5. Copy the webhook URL.
+- Drag over one calendar day to prefill a one-off time range.
+- Drag across several days to preselect a recurring weekly schedule.
+- Use quick presets such as Tonight, Tomorrow evening, Weeknights, Friday night, Saturday night, or Weekend evening.
+- Create personal saved presets.
+- Build recurring rules from the Availability page and skip individual dates as exceptions.
 
-Then either set it in `.env`:
+When several users are free, the calendar groups them into one entry and shows the names in its detail popover. Accepted or tentative events suppress overlapping free-time display for committed players.
 
-```bash
+## Live Calendar Subscriptions
+
+Each account can generate a private feed from **Profile > Live calendar subscription**. Accepted and tentative events are published through a stable `.ics` URL.
+
+- Apple Calendar: use **Subscribe** or add the `webcal://` URL.
+- Google Calendar: choose **Other calendars > From URL** and paste the HTTPS URL.
+- Outlook: choose **Add calendar > Subscribe from web** and paste the HTTPS URL.
+
+SquadSlot requests a 15-minute refresh, but each provider controls its actual polling schedule. Google Calendar may take substantially longer to show changes.
+
+The subscription URL is a bearer credential. Anyone with the URL can read that user's accepted and tentative events. Regenerate or revoke the link immediately if it is exposed.
+
+## Discord Integration
+
+SquadSlot uses a Discord webhook, so no bot token or gateway process is required.
+
+Create a webhook from the target Discord channel under **Edit Channel > Integrations**, then configure it from the Admin page or `.env`:
+
+```env
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/your-webhook-url
 DISCORD_BOT_NAME=SquadSlot
 ```
 
-Or sign in as an admin and save it from the Admin page. The Admin page also has a `Send test` button and notification rules for choosing which Discord updates are posted. Each notification has editable title/message templates with variables such as `{actor}`, `{date}`, `{title}`, `{game}`, and `{status}`.
+Available notifications include:
+
+- Availability added or removed
+- Game suggested
+- Session invite created or removed
+- Invite response changed
+- Minimum player count reached
+- Event tomorrow
+- Event starting in one hour
+- RSVP deadline
+- Weekly availability summary
+
+Administrators can enable or disable each notification, edit title and message templates, set reminder timing, and send a test webhook.
+
+## Administration And Backups
+
+Administrators can:
+
+- Promote or demote accounts
+- Delete accounts
+- Configure and test Discord
+- Manage notification templates and reminder settings
+- Export and restore a complete JSON backup
+
+Backups include:
+
+- Users and bcrypt password hashes
+- Availability, recurring rules, exceptions, and presets
+- Events, invitations, capacity, votes, and comments
+- Profiles and appearance settings
+- Live calendar subscription token hashes
+- Discord settings, notification rules, and reminder history
+
+Backups do not contain plaintext passwords. They can contain a Discord webhook URL and authentication hashes, so store them privately.
+
+## Updating
+
+Create an Admin backup before upgrading, then update and rebuild:
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+For a manually copied deployment, replace the application files while preserving `.env` and the Docker volume, then run:
+
+```bash
+docker compose up -d --build
+```
+
+Database migrations are additive and run automatically when the new container starts. The `squadslot-data` volume persists across rebuilds.
+
+See [CHANGELOG.md](CHANGELOG.md) for release details.
+
+## Troubleshooting
+
+Check container status and recent logs:
+
+```bash
+docker compose ps
+docker compose logs --tail=150 squadslot
+```
+
+Common causes of restart loops:
+
+- `SESSION_SECRET` is missing or shorter than 32 characters.
+- A bind-mounted `/data` directory is not writable by the container user.
+- Another service already uses port `8080`.
+- `APP_URL` does not match the public domain or proxy scheme.
+
+If old UI assets remain after an update, perform a hard refresh or remove and reinstall the PWA so the updated service worker takes control.
 
 ## Local Development
 
-Install dependencies:
+Requirements:
+
+- Node.js 20
+- npm
+
+Install and run:
 
 ```bash
-npm install
-```
-
-Run the frontend and API together:
-
-```bash
+npm ci
 npm run dev
 ```
 
-Run the admin settings smoke test:
-
-```bash
-npm test
-```
-
-The Vite frontend runs on:
+Frontend:
 
 ```text
 http://localhost:5173
 ```
 
-The Express API runs on:
+API:
 
 ```text
 http://localhost:8080
 ```
 
-## Production Build Without Docker
+Verification:
 
 ```bash
-npm install
+npm run lint
+npm test
 npm run build
-npm start
 ```
 
-Useful environment variables:
+Run the production server without Docker:
 
 ```bash
-PORT=8080
-DATABASE_PATH=/data/squadslot.db
-SESSION_SECRET=replace-with-a-long-random-secret-at-least-32-characters
-APP_URL=https://calendar.yourdomain.com
-DISCORD_WEBHOOK_URL=
-DISCORD_BOT_NAME=SquadSlot
-TRUST_PROXY=1
+SESSION_SECRET=replace-with-a-long-random-secret-at-least-32-characters npm start
 ```
 
-## Live Calendar Subscriptions
+## Environment Variables
 
-Each account can create a private live calendar URL from **Profile > Live calendar subscription**. Accepted and tentative SquadSlot events are published through that feed and calendar apps periodically refresh it.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PORT` | `8080` | Express server port |
+| `DATABASE_PATH` | `/data/squadslot.db` in Docker | SQLite database location |
+| `TZ` | `Europe/London` | Container timezone |
+| `SESSION_SECRET` | none in production | Signs login sessions; minimum 32 characters |
+| `APP_URL` | `http://localhost:8080` | Public base URL used for links and calendar feeds |
+| `TRUST_PROXY` | `0` | Set to `1` behind a trusted reverse proxy |
+| `DISCORD_WEBHOOK_URL` | empty | Optional Discord webhook |
+| `DISCORD_BOT_NAME` | `SquadSlot` | Discord webhook display name |
+| `SQUADSLOT_CLEAN_DEMO_DATA` | `false` | Development-only cleanup for legacy seeded demo users |
 
-- Apple Calendar: use the **Subscribe** button or add a subscribed calendar using the `webcal://` URL.
-- Google Calendar: open **Other calendars > From URL** and paste the HTTPS subscription URL.
-- Outlook: choose **Add calendar > Subscribe from web** and paste the HTTPS subscription URL.
+## Security
 
-Calendar apps control their own refresh interval, so changes may not appear immediately. SquadSlot requests a 15-minute refresh, but some providers, particularly Google Calendar, may refresh less frequently.
+- Passwords are stored as bcrypt hashes.
+- Login sessions use signed HTTP-only, same-site cookies.
+- Production requires a strong `SESSION_SECRET`.
+- State-changing API requests enforce JSON content type and same-origin checks.
+- Authentication endpoints have in-memory rate limiting.
+- Discord webhook URLs are restricted to Discord webhook hosts.
+- Subscription tokens are random bearer credentials stored as SHA-256 hashes.
+- Common CSP, frame, referrer, permissions, and content-sniffing headers are enabled.
+- The Docker runtime runs as the unprivileged `node` user.
 
-The URL is a bearer credential. Anyone with it can read that account's accepted and tentative event feed. Regenerate or revoke it from Profile if it is shared accidentally.
+## Technology
 
-## Security Notes
+- React and Vite
+- Node.js and Express
+- SQLite through `better-sqlite3`
+- Docker multi-stage build
+- Steam Store public endpoints
+- Discord webhooks
+- iCalendar (`.ics`) feeds
+- Progressive Web App manifest and service worker
 
-- `SESSION_SECRET` is required in production and must be at least 32 characters.
-- Calendar subscription tokens are stored as SHA-256 hashes and can be regenerated or revoked by the account owner.
-- Mutating API requests require `application/json` and a same-origin `Origin` or `Referer` header in production.
-- Discord webhook URLs are validated so the server only posts to Discord webhook endpoints.
-- Auth endpoints include basic in-memory rate limiting.
-- The app sends common security headers including CSP, frame blocking, referrer policy, and content-type sniffing protection.
-- If you intentionally need to clear old seeded demo data from a development database, start once with `SQUADSLOT_CLEAN_DEMO_DATA=true`. It is off by default to avoid accidental data loss.
+## Steam Availability
 
-## Updating
-
-Pull or copy the latest project files, then rebuild the container:
-
-```bash
-docker compose down
-docker compose up --build -d
-```
-
-The Docker volume keeps the SQLite database between rebuilds.
-
-## Backups
-
-Admins can export and restore backup JSON files from the Admin page.
-
-The backup includes:
-
-- accounts
-- bcrypt password hashes, not plaintext passwords
-- availability/free-time entries
-- recurring availability rules, exceptions, and presets
-- events
-- invite responses
-- live calendar subscription token hashes
-- event game options, votes, comments, and capacity
-- profiles and appearance preferences
-- recent game suggestions
-- app settings
-- Discord webhook configuration
-- Discord notification rules
-- reminder delivery history
-
-Because password hashes are included, restored users can keep signing in with their existing passwords. Store backup files privately, especially if they contain a Discord webhook URL.
-
-## Notes
-
-Steam search uses public Steam store endpoints from the server side. If Steam is temporarily unavailable, the app still loads and the game list simply appears empty until a later search succeeds.
+Steam search uses public Steam Store endpoints from the server. If Steam is temporarily unavailable or rate-limited, SquadSlot remains usable and game search results may be empty until Steam responds again.
