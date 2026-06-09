@@ -1839,6 +1839,85 @@ textarea {
   margin: 8px 0 0;
 }
 
+.calendar-subscription-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 14px;
+}
+
+.calendar-subscription-panel .panel-heading > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.subscription-state {
+  margin-left: auto;
+  min-width: 54px;
+  min-height: 28px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  background: rgba(21, 25, 26, 0.08);
+  color: var(--muted-ink);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.subscription-state.active {
+  background: color-mix(in srgb, var(--accent) 30%, white);
+  color: #101313;
+}
+
+.subscription-meta,
+.subscription-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.subscription-meta {
+  color: var(--muted-ink);
+  font-size: 0.82rem;
+}
+
+.subscription-url {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px max-content;
+  gap: 8px;
+}
+
+.subscription-url input {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.dark-icon-button {
+  border-color: rgba(21, 25, 26, 0.16);
+  background: #15191a;
+  color: #f5f1e8;
+}
+
+.danger-text-button {
+  min-height: 42px;
+  border: 1px solid rgba(180, 35, 24, 0.22);
+  border-radius: 6px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: rgba(180, 35, 24, 0.08);
+  color: #b42318;
+  font-weight: 850;
+}
+
+.subscription-warning {
+  margin: 0;
+  color: #7b4a28;
+  font-size: 0.8rem;
+}
+
 .appearance-row {
   display: grid;
   grid-template-columns: 1fr 1fr 54px;
@@ -2144,6 +2223,18 @@ textarea {
 
   .appearance-row {
     grid-template-columns: 1fr;
+  }
+
+  .subscription-url {
+    grid-template-columns: minmax(0, 1fr) 42px;
+  }
+
+  .subscription-url .secondary-button {
+    grid-column: 1 / -1;
+  }
+
+  .subscription-actions > * {
+    width: 100%;
   }
 
   .suggestion-grid {

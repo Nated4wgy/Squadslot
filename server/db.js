@@ -31,6 +31,13 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS calendar_subscriptions (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS availability (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -61,7 +68,8 @@ db.exec(`
     start_time TEXT NOT NULL,
     end_time TEXT NOT NULL,
     notes TEXT DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS event_invites (
@@ -198,6 +206,10 @@ if (!eventColumns.includes("ready_announced")) {
 }
 if (!eventColumns.includes("selected_game_option_id")) {
   db.exec("ALTER TABLE events ADD COLUMN selected_game_option_id INTEGER");
+}
+if (!eventColumns.includes("updated_at")) {
+  db.exec("ALTER TABLE events ADD COLUMN updated_at TEXT");
+  db.exec("UPDATE events SET updated_at = created_at WHERE updated_at IS NULL");
 }
 
 db.exec(`

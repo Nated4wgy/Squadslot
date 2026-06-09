@@ -133,24 +133,38 @@ function icsDateTime(date, time) {
   return `${date.replaceAll("-", "")}T${time.replace(":", "")}00`;
 }
 
-export function eventsToIcs(events, calendarName = "SquadSlot") {
+function icsTimestamp(value) {
+  const date = value ? new Date(String(value).endsWith("Z") ? value : `${value}Z`) : new Date();
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().replaceAll("-", "").replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
+  return date.toISOString().replaceAll("-", "").replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
+}
+
+export function eventsToIcs(events, calendarName = "SquadSlot", options = {}) {
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     "PRODID:-//SquadSlot//Gaming Calendar//EN",
     "CALSCALE:GREGORIAN",
-    `X-WR-CALNAME:${icsEscape(calendarName)}`
+    "METHOD:PUBLISH",
+    `X-WR-CALNAME:${icsEscape(calendarName)}`,
+    "REFRESH-INTERVAL;VALUE=DURATION:PT15M",
+    "X-PUBLISHED-TTL:PT15M"
   ];
+  if (options.sourceUrl) lines.push(`URL:${icsEscape(options.sourceUrl)}`);
 
   for (const event of events) {
+    const modifiedAt = event.updatedAt || event.createdAt;
     lines.push(
       "BEGIN:VEVENT",
       `UID:squadslot-${event.id}@squadslot`,
-      `DTSTAMP:${new Date().toISOString().replaceAll("-", "").replaceAll(":", "").replace(/\.\d{3}Z$/, "Z")}`,
+      `DTSTAMP:${icsTimestamp(event.createdAt)}`,
+      `LAST-MODIFIED:${icsTimestamp(modifiedAt)}`,
       `DTSTART:${icsDateTime(event.date, event.startTime)}`,
       `DTEND:${icsDateTime(event.date, event.endTime)}`,
       `SUMMARY:${icsEscape(event.title)}`,
       `DESCRIPTION:${icsEscape([event.gameTitle, event.notes].filter(Boolean).join(" - "))}`,
+      `STATUS:${event.calendarStatus === "tentative" ? "TENTATIVE" : "CONFIRMED"}`,
+      "TRANSP:OPAQUE",
       "END:VEVENT"
     );
   }

@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Copy,
   Download,
   Dices,
   Trash2,
@@ -19,6 +20,7 @@ import {
   MousePointer2,
   Plus,
   Repeat,
+  RefreshCw,
   Search,
   Send,
   Settings,
@@ -26,6 +28,7 @@ import {
   Sparkles,
   Sun,
   UserRound,
+  Unlink,
   Vote,
   Zap,
   UsersRound
@@ -1209,7 +1212,7 @@ function EventDetails({ user, event, refresh, onDelete }) {
   );
 }
 
-function EventsView({ user, events, refresh }) {
+function EventsView({ user, events, refresh, onOpenSubscription }) {
   const managedEvents = events
     .filter((event) => {
       const mine = event.invites.find((invite) => invite.userId === user.id);
@@ -1229,7 +1232,10 @@ function EventsView({ user, events, refresh }) {
           <h1>Events</h1>
           <p>Manage sessions you created, accepted, or marked tentative.</p>
         </div>
-        <a className="secondary-button" href="/api/calendar.ics"><Download size={16} /> Export my calendar</a>
+        <div className="toolbar">
+          <button className="secondary-button" type="button" onClick={onOpenSubscription}><RefreshCw size={16} /> Live calendar</button>
+          <a className="secondary-button" href="/api/calendar.ics"><Download size={16} /> Download .ics</a>
+        </div>
       </header>
       {managedEvents.length === 0 && <section className="table-panel"><p className="muted">No accepted or tentative events yet.</p></section>}
       <div className="event-detail-list">
@@ -1414,6 +1420,15 @@ function TonightView({ dashboard, setActiveView }) {
 function ProfileView({ user, onSaved }) {
   const [form, setForm] = useState({ ...user });
   const [message, setMessage] = useState("");
+  const [subscription, setSubscription] = useState({ active: false, createdAt: null, lastUsedAt: null });
+  const [subscriptionUrls, setSubscriptionUrls] = useState(null);
+  const [subscriptionMessage, setSubscriptionMessage] = useState("");
+
+  useEffect(() => {
+    api("/api/calendar/subscription")
+      .then((payload) => setSubscription(payload.subscription))
+      .catch((error) => setSubscriptionMessage(error.message));
+  }, []);
 
   async function save(event) {
     event.preventDefault();
@@ -1421,6 +1436,33 @@ function ProfileView({ user, onSaved }) {
     setForm(payload.profile);
     onSaved(payload.profile);
     setMessage("Profile saved.");
+  }
+
+  async function generateSubscription() {
+    const payload = await api("/api/calendar/subscription", { method: "POST", body: JSON.stringify({}) });
+    setSubscription(payload.subscription);
+    setSubscriptionUrls({
+      httpsUrl: payload.subscription.httpsUrl,
+      webcalUrl: payload.subscription.webcalUrl
+    });
+    setSubscriptionMessage("Private live calendar link generated.");
+  }
+
+  async function copySubscription() {
+    if (!subscriptionUrls?.httpsUrl) return;
+    try {
+      await navigator.clipboard.writeText(subscriptionUrls.httpsUrl);
+      setSubscriptionMessage("Subscription URL copied.");
+    } catch {
+      setSubscriptionMessage("Copy failed. Select the URL manually.");
+    }
+  }
+
+  async function revokeSubscription() {
+    await api("/api/calendar/subscription", { method: "DELETE" });
+    setSubscription({ active: false, createdAt: null, lastUsedAt: null });
+    setSubscriptionUrls(null);
+    setSubscriptionMessage("Live calendar link revoked.");
   }
 
   return (
@@ -1459,6 +1501,44 @@ function ProfileView({ user, onSaved }) {
           </div>
           <button className="primary-button"><Settings size={16} /> Save profile</button>
           {message && <p className="muted">{message}</p>}
+        </section>
+        <section className="table-panel calendar-subscription-panel">
+          <div className="panel-heading">
+            <RefreshCw size={18} />
+            <div>
+              <h2>Live calendar subscription</h2>
+              <p>Accepted and tentative events update through a private calendar feed.</p>
+            </div>
+            <span className={`subscription-state${subscription.active ? " active" : ""}`}>
+              {subscription.active ? "Active" : "Off"}
+            </span>
+          </div>
+          {subscription.active && (
+            <div className="subscription-meta">
+              <span>Created {subscription.createdAt ? new Date(`${subscription.createdAt}${subscription.createdAt.endsWith("Z") ? "" : "Z"}`).toLocaleString() : "recently"}</span>
+              <span>{subscription.lastUsedAt ? `Last refreshed ${new Date(`${subscription.lastUsedAt}${subscription.lastUsedAt.endsWith("Z") ? "" : "Z"}`).toLocaleString()}` : "Not refreshed yet"}</span>
+            </div>
+          )}
+          {subscriptionUrls && (
+            <div className="subscription-url">
+              <input aria-label="Private calendar subscription URL" readOnly value={subscriptionUrls.httpsUrl} />
+              <button className="icon-button dark-icon-button" type="button" onClick={copySubscription} aria-label="Copy calendar subscription URL"><Copy size={17} /></button>
+              <a className="secondary-button" href={subscriptionUrls.webcalUrl}><CalendarDays size={16} /> Subscribe</a>
+            </div>
+          )}
+          {subscription.active && !subscriptionUrls && (
+            <p className="muted">The existing private URL is hidden. Regenerate it to display and copy a new URL.</p>
+          )}
+          <div className="subscription-actions">
+            <button className="primary-button" type="button" onClick={generateSubscription}>
+              <RefreshCw size={16} /> {subscription.active ? "Regenerate private link" : "Generate private link"}
+            </button>
+            {subscription.active && (
+              <button className="danger-text-button" type="button" onClick={revokeSubscription}><Unlink size={16} /> Revoke</button>
+            )}
+          </div>
+          <p className="subscription-warning">Treat the subscription URL like a password. Regenerating or revoking it disconnects existing calendar apps.</p>
+          {subscriptionMessage && <p className="muted">{subscriptionMessage}</p>}
         </section>
       </form>
     </>
@@ -1813,7 +1893,14 @@ function App() {
           />
         )}
         {activeView === "tonight" && <TonightView dashboard={data.dashboard} setActiveView={setActiveView} />}
-        {activeView === "events" && <EventsView user={user} events={data.events} refresh={refresh} />}
+        {activeView === "events" && (
+          <EventsView
+            user={user}
+            events={data.events}
+            refresh={refresh}
+            onOpenSubscription={() => setActiveView("profile")}
+          />
+        )}
         {activeView === "invites" && <InvitesView user={user} events={data.events} refresh={refresh} />}
         {activeView === "free-time" && <FreeTimeView user={user} availability={data.availability} refresh={refresh} />}
         {activeView === "friends" && <FriendsView friends={data.friends} availability={data.availability} events={data.events} />}

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { URL } from "node:url";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -201,6 +202,53 @@ async function main() {
 
     result = await request(`/api/events/${eventId}/ics`, friendCookie);
     assert(result.response.ok && result.payload.includes("BEGIN:VEVENT"), "ICS export failed.");
+
+    result = await request("/api/calendar/subscription", friendCookie, {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+    assert(result.response.status === 201 && result.payload.subscription.httpsUrl, "Calendar subscription creation failed.");
+    const firstSubscriptionPath = new URL(result.payload.subscription.httpsUrl).pathname;
+
+    result = await request(firstSubscriptionPath, "");
+    assert(
+      result.response.ok
+      && result.payload.includes("METHOD:PUBLISH")
+      && result.payload.includes("REFRESH-INTERVAL;VALUE=DURATION:PT15M")
+      && result.payload.includes(`UID:squadslot-${eventId}@squadslot`)
+      && result.payload.includes("STATUS:CONFIRMED"),
+      "Live calendar feed did not include the accepted event."
+    );
+
+    result = await request(`/api/events/${eventId}`, adminCookie, {
+      method: "PATCH",
+      body: JSON.stringify({ date: eventDate, startTime: "21:00", endTime: "23:00" })
+    });
+    assert(result.response.ok, "Event reschedule failed.");
+
+    result = await request(firstSubscriptionPath, "");
+    assert(
+      result.response.ok
+      && result.payload.includes(`DTSTART:${eventDate.replaceAll("-", "")}T210000`)
+      && result.payload.includes("LAST-MODIFIED:"),
+      "Live calendar feed did not reflect the rescheduled event."
+    );
+
+    result = await request("/api/calendar/subscription", friendCookie, {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+    assert(result.response.status === 201, "Calendar subscription regeneration failed.");
+    const replacementSubscriptionPath = new URL(result.payload.subscription.httpsUrl).pathname;
+    result = await request(firstSubscriptionPath, "");
+    assert(result.response.status === 404, "Regenerating a calendar subscription did not invalidate the old URL.");
+    result = await request(replacementSubscriptionPath, "");
+    assert(result.response.ok, "Replacement calendar subscription URL failed.");
+
+    result = await request("/api/calendar/subscription", friendCookie, { method: "DELETE" });
+    assert(result.response.ok, "Calendar subscription revocation failed.");
+    result = await request(replacementSubscriptionPath, "");
+    assert(result.response.status === 404, "Revoked calendar subscription remained accessible.");
 
     result = await request("/api/dashboard", adminCookie);
     assert(result.response.ok && result.payload.dashboard.nextEvent.id === eventId, "Dashboard next event failed.");

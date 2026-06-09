@@ -13,7 +13,7 @@ SquadSlot is a self-hosted gaming calendar for friend groups. It helps a squad s
 - Steam-backed game search and game detail lookup
 - Session creation with friend invites and player capacity
 - Multi-game voting with random tie resolution
-- Event comments and calendar export
+- Event comments, one-off calendar export, and private live calendar subscriptions
 - Invite responses: accept, tentative, decline
 - Events page for created, accepted, and tentative sessions
 - Profiles with avatars, timezone, Discord username, preferences, themes, and accent colours
@@ -171,9 +171,22 @@ DISCORD_BOT_NAME=SquadSlot
 TRUST_PROXY=1
 ```
 
+## Live Calendar Subscriptions
+
+Each account can create a private live calendar URL from **Profile > Live calendar subscription**. Accepted and tentative SquadSlot events are published through that feed and calendar apps periodically refresh it.
+
+- Apple Calendar: use the **Subscribe** button or add a subscribed calendar using the `webcal://` URL.
+- Google Calendar: open **Other calendars > From URL** and paste the HTTPS subscription URL.
+- Outlook: choose **Add calendar > Subscribe from web** and paste the HTTPS subscription URL.
+
+Calendar apps control their own refresh interval, so changes may not appear immediately. SquadSlot requests a 15-minute refresh, but some providers, particularly Google Calendar, may refresh less frequently.
+
+The URL is a bearer credential. Anyone with it can read that account's accepted and tentative event feed. Regenerate or revoke it from Profile if it is shared accidentally.
+
 ## Security Notes
 
 - `SESSION_SECRET` is required in production and must be at least 32 characters.
+- Calendar subscription tokens are stored as SHA-256 hashes and can be regenerated or revoked by the account owner.
 - Mutating API requests require `application/json` and a same-origin `Origin` or `Referer` header in production.
 - Discord webhook URLs are validated so the server only posts to Discord webhook endpoints.
 - Auth endpoints include basic in-memory rate limiting.
@@ -203,6 +216,7 @@ The backup includes:
 - recurring availability rules, exceptions, and presets
 - events
 - invite responses
+- live calendar subscription token hashes
 - event game options, votes, comments, and capacity
 - profiles and appearance preferences
 - recent game suggestions

@@ -1,5 +1,6 @@
 import express from "express";
 import cookieParser from "cookie-parser";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import bcrypt from "bcryptjs";
@@ -184,6 +185,29 @@ function isValidTimeZone(value) {
   }
 }
 
+function calendarTokenHash(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function publicBaseUrl(req) {
+  const configured = cleanText(process.env.APP_URL || getSetting("appUrl", "")).replace(/\/+$/, "");
+  if (configured && isValidHttpUrl(configured)) return configured;
+
+  const forwardedHost = firstForwardedHeader(req.get("x-forwarded-host"));
+  const forwardedProto = firstForwardedHeader(req.get("x-forwarded-proto"));
+  const host = forwardedHost || req.get("host");
+  const protocol = forwardedProto || req.protocol;
+  return `${protocol}://${host}`;
+}
+
+function calendarSubscriptionUrls(req, token) {
+  const httpsUrl = `${publicBaseUrl(req)}/calendar/${token}.ics`;
+  return {
+    httpsUrl,
+    webcalUrl: httpsUrl.replace(/^https?:\/\//, "webcal://")
+  };
+}
+
 function authRateLimit(req, res, next) {
   const key = req.ip || req.socket.remoteAddress || "unknown";
   const now = Date.now();
@@ -232,7 +256,7 @@ function backupTables() {
                title, date, start_time AS startTime, end_time AS endTime, notes,
                min_players AS minPlayers, max_players AS maxPlayers, rsvp_deadline AS rsvpDeadline,
                ready_announced AS readyAnnounced, selected_game_option_id AS selectedGameOptionId,
-               created_at AS createdAt
+               created_at AS createdAt, COALESCE(updated_at, created_at) AS updatedAt
         FROM events
         ORDER BY id
       `)
@@ -267,6 +291,10 @@ function backupTables() {
       SELECT id, user_id AS userId, steam_app_id AS steamAppId, title, image_url AS imageUrl, created_at AS createdAt
       FROM game_suggestions ORDER BY id
     `).all(),
+    calendarSubscriptions: db.prepare(`
+      SELECT user_id AS userId, token_hash AS tokenHash, created_at AS createdAt, last_used_at AS lastUsedAt
+      FROM calendar_subscriptions ORDER BY user_id
+    `).all(),
     reminderLog: db.prepare("SELECT reminder_key AS reminderKey, sent_at AS sentAt FROM reminder_log ORDER BY reminder_key").all(),
     settings: db.prepare("SELECT key, value FROM app_settings ORDER BY key").all()
   };
@@ -294,6 +322,7 @@ function validateBackup(payload) {
     "eventGameVotes",
     "eventComments",
     "gameSuggestions",
+    "calendarSubscriptions",
     "reminderLog"
   ]) {
     if (tables[optionalName] !== undefined) assertArray(tables[optionalName], optionalName);
@@ -314,6 +343,7 @@ function validateBackup(payload) {
 
 function restoreBackupTables(tables) {
   const restore = db.transaction(() => {
+    db.prepare("DELETE FROM calendar_subscriptions").run();
     db.prepare("DELETE FROM reminder_log").run();
     db.prepare("DELETE FROM game_suggestions").run();
     db.prepare("DELETE FROM event_comments").run();
@@ -356,6 +386,19 @@ function restoreBackupTables(tables) {
       );
     }
 
+    const insertCalendarSubscription = db.prepare(`
+      INSERT INTO calendar_subscriptions (user_id, token_hash, created_at, last_used_at)
+      VALUES (?, ?, ?, ?)
+    `);
+    for (const subscription of tables.calendarSubscriptions || []) {
+      insertCalendarSubscription.run(
+        subscription.userId,
+        subscription.tokenHash,
+        subscription.createdAt,
+        subscription.lastUsedAt || null
+      );
+    }
+
     const insertGame = db.prepare(`
       INSERT INTO games (id, title, genre, max_players, suggested_by, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -376,8 +419,8 @@ function restoreBackupTables(tables) {
       INSERT INTO events (
         id, owner_id, game_id, steam_app_id, game_title, title, date, start_time,
         end_time, notes, min_players, max_players, rsvp_deadline, ready_announced,
-        selected_game_option_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        selected_game_option_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const event of tables.events) {
       insertEvent.run(
@@ -396,7 +439,8 @@ function restoreBackupTables(tables) {
         event.rsvpDeadline || null,
         event.readyAnnounced || 0,
         event.selectedGameOptionId || null,
-        event.createdAt
+        event.createdAt,
+        event.updatedAt || event.createdAt
       );
     }
 
@@ -479,7 +523,8 @@ function eventRows(where = "", params = []) {
              e.end_time AS endTime, e.notes, e.steam_app_id AS steamAppId,
              COALESCE(e.game_title, g.title) AS gameTitle, e.min_players AS minPlayers,
              e.max_players AS maxPlayers, e.rsvp_deadline AS rsvpDeadline,
-             e.ready_announced AS readyAnnounced, e.selected_game_option_id AS selectedGameOptionId
+             e.ready_announced AS readyAnnounced, e.selected_game_option_id AS selectedGameOptionId,
+             e.created_at AS createdAt, COALESCE(e.updated_at, e.created_at) AS updatedAt
       FROM events e
       JOIN users owner ON owner.id = e.owner_id
       LEFT JOIN games g ON g.id = e.game_id
@@ -526,6 +571,16 @@ function eventRows(where = "", params = []) {
         voters: votes.filter((vote) => vote.optionId === option.id).map((vote) => vote.userId)
       }))
   }));
+}
+
+function calendarEventsForUser(userId) {
+  return eventRows().flatMap((event) => {
+    if (event.ownerId === userId) return [{ ...event, calendarStatus: "accepted" }];
+    const invite = event.invites.find((item) => item.userId === userId);
+    return ["accepted", "tentative"].includes(invite?.status)
+      ? [{ ...event, calendarStatus: invite.status }]
+      : [];
+  });
 }
 
 async function announceReadyIfNeeded(eventId) {
@@ -663,6 +718,44 @@ app.put("/api/profile", requireAuth, (req, res) => {
   );
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id);
   res.json({ profile: publicUser(user) });
+});
+
+app.get("/api/calendar/subscription", requireAuth, (req, res) => {
+  const subscription = db.prepare(`
+    SELECT created_at AS createdAt, last_used_at AS lastUsedAt
+    FROM calendar_subscriptions
+    WHERE user_id = ?
+  `).get(req.user.id);
+  res.json({
+    subscription: subscription
+      ? { active: true, createdAt: subscription.createdAt, lastUsedAt: subscription.lastUsedAt }
+      : { active: false, createdAt: null, lastUsedAt: null }
+  });
+});
+
+app.post("/api/calendar/subscription", requireAuth, (req, res) => {
+  const token = crypto.randomBytes(32).toString("base64url");
+  db.prepare(`
+    INSERT INTO calendar_subscriptions (user_id, token_hash, created_at, last_used_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP, NULL)
+    ON CONFLICT(user_id) DO UPDATE SET
+      token_hash = excluded.token_hash,
+      created_at = CURRENT_TIMESTAMP,
+      last_used_at = NULL
+  `).run(req.user.id, calendarTokenHash(token));
+  res.status(201).json({
+    subscription: {
+      active: true,
+      createdAt: new Date().toISOString(),
+      lastUsedAt: null,
+      ...calendarSubscriptionUrls(req, token)
+    }
+  });
+});
+
+app.delete("/api/calendar/subscription", requireAuth, (req, res) => {
+  db.prepare("DELETE FROM calendar_subscriptions WHERE user_id = ?").run(req.user.id);
+  res.json({ ok: true });
 });
 
 app.get("/api/games", requireAuth, async (req, res) => {
@@ -917,6 +1010,7 @@ app.patch("/api/events/:id/invites/me", requireAuth, async (req, res) => {
   }
 
   db.prepare("UPDATE event_invites SET status = ? WHERE event_id = ? AND user_id = ?").run(status, eventId, req.user.id);
+  db.prepare("UPDATE events SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(eventId);
   const event = db
     .prepare(`
       SELECT e.title, e.date, e.start_time AS startTime, e.end_time AS endTime,
@@ -960,7 +1054,11 @@ app.patch("/api/events/:id", requireAuth, (req, res) => {
   if (!isDateString(date) || !isTimeString(startTime) || !isTimeString(endTime) || startTime >= endTime) {
     return res.status(400).json({ error: "Event date or time is invalid." });
   }
-  db.prepare("UPDATE events SET date = ?, start_time = ?, end_time = ?, ready_announced = 0 WHERE id = ?")
+  db.prepare(`
+    UPDATE events
+    SET date = ?, start_time = ?, end_time = ?, ready_announced = 0, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `)
     .run(date, startTime, endTime, eventId);
   res.json({ ok: true });
 });
@@ -997,7 +1095,11 @@ app.post("/api/events/:id/games/randomize", requireAuth, (req, res) => {
   const topVotes = Math.max(...options.map((option) => option.voteCount));
   const tied = options.filter((option) => option.voteCount === topVotes);
   const chosen = tied[Math.floor(Math.random() * tied.length)];
-  db.prepare("UPDATE events SET selected_game_option_id = ?, steam_app_id = ?, game_title = ? WHERE id = ?")
+  db.prepare(`
+    UPDATE events
+    SET selected_game_option_id = ?, steam_app_id = ?, game_title = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `)
     .run(chosen.id, chosen.steamAppId || null, chosen.title, eventId);
   res.json({ ok: true, chosen });
 });
@@ -1048,13 +1150,33 @@ app.get("/api/events/:id/ics", requireAuth, (req, res) => {
 });
 
 app.get("/api/calendar.ics", requireAuth, (req, res) => {
-  const events = eventRows().filter((event) => (
-    event.ownerId === req.user.id
-    || event.invites.some((invite) => invite.userId === req.user.id && ["accepted", "tentative"].includes(invite.status))
-  ));
+  const events = calendarEventsForUser(req.user.id);
   res.setHeader("Content-Type", "text/calendar; charset=utf-8");
   res.setHeader("Content-Disposition", 'attachment; filename="squadslot-calendar.ics"');
-  res.send(eventsToIcs(events));
+  res.send(eventsToIcs(events, `${req.user.display_name} - SquadSlot`));
+});
+
+app.get("/calendar/:token.ics", (req, res) => {
+  const token = cleanText(req.params.token);
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return res.status(404).send("Calendar subscription not found.");
+
+  const subscription = db.prepare(`
+    SELECT cs.user_id AS userId, u.display_name AS displayName
+    FROM calendar_subscriptions cs
+    JOIN users u ON u.id = cs.user_id
+    WHERE cs.token_hash = ?
+  `).get(calendarTokenHash(token));
+  if (!subscription) return res.status(404).send("Calendar subscription not found.");
+
+  db.prepare("UPDATE calendar_subscriptions SET last_used_at = CURRENT_TIMESTAMP WHERE user_id = ?")
+    .run(subscription.userId);
+  const sourceUrl = calendarSubscriptionUrls(req, token).httpsUrl;
+  const events = calendarEventsForUser(subscription.userId);
+  res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+  res.setHeader("Content-Disposition", 'inline; filename="squadslot-live.ics"');
+  res.setHeader("Cache-Control", "private, no-cache, max-age=0");
+  res.setHeader("X-Robots-Tag", "noindex, nofollow");
+  res.send(eventsToIcs(events, `${subscription.displayName} - SquadSlot`, { sourceUrl }));
 });
 
 app.delete("/api/events/:id", requireAuth, async (req, res) => {
@@ -1150,7 +1272,11 @@ app.post("/api/events", requireAuth, async (req, res) => {
       firstOptionId ??= inserted.lastInsertRowid;
     }
     if (firstOptionId && options.length === 1) {
-      db.prepare("UPDATE events SET selected_game_option_id = ? WHERE id = ?").run(firstOptionId, result.lastInsertRowid);
+      db.prepare(`
+        UPDATE events
+        SET selected_game_option_id = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(firstOptionId, result.lastInsertRowid);
     }
     return result.lastInsertRowid;
   });
