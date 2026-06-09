@@ -306,6 +306,28 @@ async function main() {
     result = await request("/api/dashboard", adminCookie);
     assert(result.response.ok && result.payload.dashboard.nextEvent.id === eventId, "Dashboard next event failed.");
 
+    result = await request(`/api/events/${eventId}/invites/me`, adminCookie, { method: "DELETE" });
+    assert(result.response.status === 409, "An event creator should not be able to leave their own event.");
+
+    result = await request(`/api/events/${eventId}/invites/me`, friendCookie, { method: "DELETE" });
+    assert(result.response.ok, "Leaving an event failed.");
+
+    result = await request("/api/events", friendCookie);
+    const eventAfterLeave = result.payload.events.find((item) => item.id === eventId);
+    assert(
+      eventAfterLeave
+      && !eventAfterLeave.invites.some((invite) => invite.userId === friendId)
+      && eventAfterLeave.gameOptions.every((option) => !option.voters.includes(friendId))
+      && !eventAfterLeave.ready,
+      "Leaving an event did not remove the invite, vote, or ready state."
+    );
+
+    result = await request(`/api/events/${eventId}/invites/me`, friendCookie, { method: "DELETE" });
+    assert(result.response.status === 404, "Leaving an event twice should report that the user is no longer part of it.");
+
+    result = await request("/api/events", adminCookie);
+    assert(result.payload.events.some((item) => item.id === eventId), "A player leaving incorrectly deleted the event.");
+
     result = await request("/api/admin/reminders", adminCookie, {
       method: "PUT",
       body: JSON.stringify({

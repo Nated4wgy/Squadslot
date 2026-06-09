@@ -49,7 +49,7 @@ export const notificationDefinitions = [
   {
     type: "inviteResponse",
     label: "Invite responses",
-    description: "Post when someone accepts, declines, or marks an invite tentative.",
+    description: "Post when someone accepts, declines, marks an invite tentative, or leaves an event.",
     variables: ["actor", "status", "title", "game", "date", "startTime", "endTime", "owner"],
     enabledDefault: true,
     titleDefault: "Invite response",

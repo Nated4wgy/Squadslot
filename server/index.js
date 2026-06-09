@@ -1206,6 +1206,63 @@ app.patch("/api/events/:id/invites/me", requireAuth, async (req, res) => {
   res.json({ ok: true, discord });
 });
 
+app.delete("/api/events/:id/invites/me", requireAuth, async (req, res) => {
+  const eventId = Number(req.params.id);
+  const invite = db
+    .prepare(`
+      SELECT ei.status, e.owner_id AS ownerId, e.title, e.date, e.start_time AS startTime,
+             e.end_time AS endTime, owner.display_name AS ownerName,
+             COALESCE(e.game_title, g.title) AS gameTitle
+      FROM event_invites ei
+      JOIN events e ON e.id = ei.event_id
+      JOIN users owner ON owner.id = e.owner_id
+      LEFT JOIN games g ON g.id = e.game_id
+      WHERE ei.event_id = ? AND ei.user_id = ?
+    `)
+    .get(eventId, req.user.id);
+  if (!invite) return res.status(404).json({ error: "You are not part of this event." });
+  if (invite.ownerId === req.user.id) {
+    return res.status(409).json({ error: "Event creators must delete the event instead of leaving it." });
+  }
+
+  db.transaction(() => {
+    db.prepare("DELETE FROM event_game_votes WHERE event_id = ? AND user_id = ?").run(eventId, req.user.id);
+    db.prepare("DELETE FROM event_invites WHERE event_id = ? AND user_id = ?").run(eventId, req.user.id);
+    db.prepare(`
+      UPDATE events
+      SET updated_at = CURRENT_TIMESTAMP,
+          ready_announced = CASE
+            WHEN (
+              SELECT COUNT(*)
+              FROM event_invites
+              WHERE event_id = ? AND status = 'accepted'
+            ) < min_players THEN 0
+            ELSE ready_announced
+          END
+      WHERE id = ?
+    `).run(eventId, eventId);
+  })();
+
+  const discord = await notifyDiscord("inviteResponse", {
+    actor: req.user.display_name,
+    status: "left",
+    title: invite.title,
+    game: invite.gameTitle || "TBD",
+    date: invite.date,
+    startTime: invite.startTime,
+    endTime: invite.endTime,
+    owner: invite.ownerName
+  }, {
+    fields: [
+      { name: "Game", value: invite.gameTitle || "TBD", inline: true },
+      { name: "When", value: `${invite.date}, ${invite.startTime} - ${invite.endTime}`, inline: true },
+      { name: "Host", value: invite.ownerName, inline: true }
+    ],
+    color: 0x7c8790
+  });
+  res.json({ ok: true, discord });
+});
+
 app.patch("/api/events/:id", requireAuth, (req, res) => {
   const eventId = Number(req.params.id);
   const event = db.prepare("SELECT owner_id AS ownerId, start_time AS startTime, end_time AS endTime FROM events WHERE id = ?").get(eventId);

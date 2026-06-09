@@ -1109,6 +1109,14 @@ textarea {
   background: #ffb4a8;
 }
 
+.invite-actions .remove-invite-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-color: rgba(180, 35, 24, 0.22);
+  color: #b42318;
+}
+
 .search-bar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content;
@@ -1657,6 +1665,14 @@ textarea {
   gap: 14px;
 }
 
+.events-invite-panel {
+  margin-bottom: 14px;
+}
+
+.events-invite-panel .panel-heading {
+  margin-bottom: 12px;
+}
+
 .event-detail-card {
   overflow: hidden;
   background: var(--surface);
@@ -1709,8 +1725,15 @@ textarea {
 
 .event-card-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+}
+
+.compact-danger-action {
+  min-height: 38px;
+  padding: 0 11px;
 }
 
 .icon-action {

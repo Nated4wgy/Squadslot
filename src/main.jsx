@@ -1071,9 +1071,32 @@ function FriendsView({ friends, availability, events }) {
   );
 }
 
+function EventInviteRow({ event, onStatus, onRemove }) {
+  const invite = event.myInvite;
+
+  return (
+    <article className="invite-row">
+      <div>
+        <strong>{event.title}</strong>
+        <span>{event.gameTitle || "Game TBD"} - {event.date}, {event.startTime} to {event.endTime}</span>
+        <small>From {event.ownerName} - current: {invite.status}</small>
+      </div>
+      <div className="invite-actions">
+        <button className={invite.status === "accepted" ? "selected" : ""} type="button" onClick={() => onStatus(event.id, "accepted")}>Accept</button>
+        <button className={invite.status === "tentative" ? "selected" : ""} type="button" onClick={() => onStatus(event.id, "tentative")}>Tentative</button>
+        <button className={invite.status === "declined" ? "selected danger" : "danger"} type="button" onClick={() => onStatus(event.id, "declined")}>Decline</button>
+        <button className="remove-invite-button" type="button" onClick={() => onRemove(event.id)}><LogOut size={15} /> Remove</button>
+      </div>
+    </article>
+  );
+}
+
 function InvitesView({ user, events, refresh }) {
   const invites = events
-    .filter((event) => event.invites.some((invite) => invite.userId === user.id))
+    .filter((event) => (
+      event.ownerId !== user.id
+      && event.invites.some((invite) => invite.userId === user.id)
+    ))
     .map((event) => ({
       ...event,
       myInvite: event.invites.find((invite) => invite.userId === user.id)
@@ -1081,6 +1104,11 @@ function InvitesView({ user, events, refresh }) {
 
   async function setStatus(eventId, status) {
     await api(`/api/events/${eventId}/invites/me`, { method: "PATCH", body: JSON.stringify({ status }) });
+    refresh();
+  }
+
+  async function removeInvite(eventId) {
+    await api(`/api/events/${eventId}/invites/me`, { method: "DELETE" });
     refresh();
   }
 
@@ -1095,30 +1123,21 @@ function InvitesView({ user, events, refresh }) {
       <section className="table-panel">
         {invites.length === 0 && <p className="muted">No invites yet.</p>}
         {invites.map((event) => (
-          <article className="invite-row" key={event.id}>
-            <div>
-              <strong>{event.title}</strong>
-              <span>{event.gameTitle || "Game TBD"} - {event.date}, {event.startTime} to {event.endTime}</span>
-              <small>From {event.ownerName} - current: {event.myInvite.status}</small>
-            </div>
-            <div className="invite-actions">
-              <button className={event.myInvite.status === "accepted" ? "selected" : ""} onClick={() => setStatus(event.id, "accepted")}>Accept</button>
-              <button className={event.myInvite.status === "tentative" ? "selected" : ""} onClick={() => setStatus(event.id, "tentative")}>Tentative</button>
-              <button className={event.myInvite.status === "declined" ? "selected danger" : "danger"} onClick={() => setStatus(event.id, "declined")}>Decline</button>
-            </div>
-          </article>
+          <EventInviteRow event={event} onStatus={setStatus} onRemove={removeInvite} key={event.id} />
         ))}
       </section>
     </>
   );
 }
 
-function EventDetails({ user, event, refresh, onDelete }) {
+function EventDetails({ user, event, refresh, onDelete, onLeave }) {
   const [expanded, setExpanded] = useState(false);
   const [comments, setComments] = useState([]);
   const [comment, setComment] = useState("");
   const accepted = event.invites.filter((invite) => invite.status === "accepted");
+  const myInvite = event.invites.find((invite) => invite.userId === user.id);
   const canManage = event.ownerId === user.id || user.role === "admin";
+  const canLeave = event.ownerId !== user.id && Boolean(myInvite);
   const myVote = event.gameOptions.find((option) => option.voters.includes(user.id))?.id;
 
   async function loadComments() {
@@ -1168,7 +1187,8 @@ function EventDetails({ user, event, refresh, onDelete }) {
         <div className="event-card-actions">
           <button className="secondary-button" type="button" onClick={toggleExpanded}><MessageSquare size={16} /> {expanded ? "Close" : "Details"}</button>
           <a className="icon-action" href={`/api/events/${event.id}/ics`} title="Download calendar event"><Download size={17} /></a>
-          {canManage && <button className="danger-button" onClick={() => onDelete(event.id)} aria-label={`Remove ${event.title}`}><Trash2 size={16} /></button>}
+          {canLeave && <button className="danger-text-button compact-danger-action" type="button" onClick={() => onLeave(event.id)}><LogOut size={16} /> Leave event</button>}
+          {canManage && <button className="danger-button" type="button" onClick={() => onDelete(event.id)} aria-label={`Delete ${event.title}`} title="Delete event"><Trash2 size={16} /></button>}
         </div>
       </div>
       {expanded && (
@@ -1213,6 +1233,13 @@ function EventDetails({ user, event, refresh, onDelete }) {
 }
 
 function EventsView({ user, events, refresh, onOpenSubscription }) {
+  const pendingInvites = events
+    .filter((event) => event.invites.some((invite) => invite.userId === user.id && invite.status === "invited"))
+    .map((event) => ({
+      ...event,
+      myInvite: event.invites.find((invite) => invite.userId === user.id)
+    }))
+    .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
   const managedEvents = events
     .filter((event) => {
       const mine = event.invites.find((invite) => invite.userId === user.id);
@@ -1225,21 +1252,45 @@ function EventsView({ user, events, refresh, onOpenSubscription }) {
     refresh();
   }
 
+  async function leaveEvent(eventId) {
+    await api(`/api/events/${eventId}/invites/me`, { method: "DELETE" });
+    refresh();
+  }
+
+  async function setInviteStatus(eventId, status) {
+    await api(`/api/events/${eventId}/invites/me`, { method: "PATCH", body: JSON.stringify({ status }) });
+    refresh();
+  }
+
   return (
     <>
       <header className="topbar">
         <div>
           <h1>Events</h1>
-          <p>Manage sessions you created, accepted, or marked tentative.</p>
+          <p>Respond to invitations and manage sessions you joined or created.</p>
         </div>
         <div className="toolbar">
           <button className="secondary-button" type="button" onClick={onOpenSubscription}><RefreshCw size={16} /> Live calendar</button>
           <a className="secondary-button" href="/api/calendar.ics"><Download size={16} /> Download .ics</a>
         </div>
       </header>
+      <section className="table-panel events-invite-panel">
+        <div className="panel-heading">
+          <Bell size={18} />
+          <div>
+            <h2>Pending invites</h2>
+            <p>{pendingInvites.length > 0 ? `${pendingInvites.length} waiting for your response.` : "No invitations are waiting."}</p>
+          </div>
+        </div>
+        {pendingInvites.map((event) => (
+          <EventInviteRow event={event} onStatus={setInviteStatus} onRemove={leaveEvent} key={event.id} />
+        ))}
+      </section>
       {managedEvents.length === 0 && <section className="table-panel"><p className="muted">No accepted or tentative events yet.</p></section>}
       <div className="event-detail-list">
-        {managedEvents.map((event) => <EventDetails user={user} event={event} refresh={refresh} onDelete={removeEvent} key={event.id} />)}
+        {managedEvents.map((event) => (
+          <EventDetails user={user} event={event} refresh={refresh} onDelete={removeEvent} onLeave={leaveEvent} key={event.id} />
+        ))}
       </div>
     </>
   );

@@ -13,7 +13,7 @@ SquadSlot is a self-hosted gaming calendar for friend groups. Share free time, f
 - Shared weekly calendar with grouped availability and event details
 - One-off or recurring availability with multi-day drag selection
 - Best-time finder that ranks the strongest player overlap
-- Event invitations with accepted, tentative, and declined responses
+- Event invitations shown in the Events tab with accepted, tentative, declined, remove, and leave controls
 - Minimum and maximum player capacity with ready-state notifications
 - Multiple game options, invitee voting, and random tie resolution
 - Steam search-as-you-type with game artwork and details

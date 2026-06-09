@@ -15,6 +15,8 @@ Significant SquadSlot changes are recorded here by release date.
 - Added an explicit Once/Weekly availability composer with weekday selection.
 - Added Tomorrow evening, Weeknights, Saturday night, and Weekend evening quick presets.
 - Added a visible advanced recurring schedule manager.
+- Added pending invitations directly to the Events tab with accept, tentative, decline, and remove controls.
+- Added a Leave event action for accepted and tentative participants.
 
 ### Improvements
 
@@ -26,6 +28,7 @@ Significant SquadSlot changes are recorded here by release date.
 - Live calendar subscription hashes are included in admin backups and restores.
 - Steam images now load correctly while the PWA service worker is active.
 - Improved availability controls across desktop and mobile layouts.
+- Leaving an event now removes the participant's invitation and game vote without deleting the host's event.
 - Updated project documentation with current screenshots and deployment guidance.
 
 ### Security
@@ -34,6 +37,7 @@ Significant SquadSlot changes are recorded here by release date.
 - Only SHA-256 token hashes are stored in SQLite and backups.
 - Regenerating a subscription immediately invalidates its previous URL.
 - Revoked feeds return `404` and cannot be refreshed by calendar clients.
+- Event creators cannot bypass event ownership by leaving their own event; they must use the protected delete action.
 
 ### Fixes
 
