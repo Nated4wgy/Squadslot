@@ -2,6 +2,33 @@
 
 Significant SquadSlot changes are recorded here by release date.
 
+## 2026-06-28 - Account Recovery And Responsive Layouts
+
+### New Features
+
+- Added administrator-managed temporary password resets for user accounts.
+- Added a mandatory password replacement screen after an administrator reset.
+- Added account status indicators when a user is waiting to replace a temporary password.
+
+### Improvements
+
+- Accepted invitations now disappear from Invites and are managed from Events.
+- Events disappear from the active Events, Calendar, Dashboard, and invite views after their end time.
+- Historical events remain in backups instead of being deleted from SQLite.
+
+### Responsive Fixes
+
+- Rebuilt tablet navigation so labels keep their width inside a contained horizontal scroller.
+- Removed tablet grid minimums that caused panels to collide in portrait orientation.
+- Added stable phone header rows, text containment, and compact action layouts.
+- Fixed excess header height and layout shifts when rotating an iPad between orientations.
+
+### Security
+
+- Password resets invalidate all existing sessions for the affected account.
+- Temporary-password sessions can only change the password or sign out.
+- Users must choose a different password before accessing SquadSlot again.
+
 ## 2026-06-09 - Live Calendars And Availability Improvements
 
 ### New Features

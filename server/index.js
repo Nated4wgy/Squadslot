@@ -124,9 +124,24 @@ app.use("/api", (req, res, next) => {
 });
 
 app.use((req, _res, next) => {
-  const userId = readSessionCookie(req);
-  req.user = userId ? db.prepare("SELECT * FROM users WHERE id = ?").get(userId) : null;
+  const session = readSessionCookie(req);
+  const user = session ? db.prepare("SELECT * FROM users WHERE id = ?").get(session.userId) : null;
+  req.user = user && Number(user.session_version || 0) === session.sessionVersion ? user : null;
   next();
+});
+
+app.use("/api", (req, res, next) => {
+  if (!req.user?.must_change_password) return next();
+  const allowed = (
+    (req.method === "GET" && req.path === "/me")
+    || (req.method === "POST" && req.path === "/auth/logout")
+    || (req.method === "PUT" && req.path === "/me/password")
+  );
+  if (allowed) return next();
+  return res.status(403).json({
+    error: "You must change your temporary password before continuing.",
+    code: "PASSWORD_CHANGE_REQUIRED"
+  });
 });
 
 function requireAuth(req, res, next) {
@@ -240,6 +255,7 @@ function backupTables() {
                avatar_url AS avatarUrl, timezone, favorite_games AS favoriteGames,
                preferred_start AS preferredStart, preferred_end AS preferredEnd,
                profile_color AS profileColor, theme, accent, discord_username AS discordUsername,
+               must_change_password AS mustChangePassword, session_version AS sessionVersion,
                created_at AS createdAt
         FROM users ORDER BY id
       `)
@@ -363,8 +379,8 @@ function restoreBackupTables(tables) {
       INSERT INTO users (
         id, username, display_name, role, password_hash, avatar_url, timezone,
         favorite_games, preferred_start, preferred_end, profile_color, theme,
-        accent, discord_username, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        accent, discord_username, must_change_password, session_version, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const user of tables.users) {
       insertUser.run(
@@ -382,6 +398,8 @@ function restoreBackupTables(tables) {
         user.theme || "dark",
         user.accent || "#2fd3ba",
         user.discordUsername || "",
+        user.mustChangePassword ? 1 : 0,
+        Number(user.sessionVersion || 0),
         user.createdAt
       );
     }
@@ -581,6 +599,19 @@ function calendarEventsForUser(userId) {
       ? [{ ...event, calendarStatus: invite.status }]
       : [];
   });
+}
+
+function currentDateTimeKey(now = new Date()) {
+  const date = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0")
+  ].join("-");
+  return `${date} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+}
+
+function isUpcomingEvent(event, nowKey = currentDateTimeKey()) {
+  return `${event.date} ${event.endTime}` > nowKey;
 }
 
 function timeToMinutes(value) {
@@ -808,8 +839,8 @@ app.post("/api/auth/register", authRateLimit, (req, res) => {
   }
 
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(result.lastInsertRowid);
-  setSession(res, user.id);
-  res.status(201).json({ user: publicUser(user) });
+  setSession(res, user.id, Number(user.session_version || 0));
+  res.status(201).json({ user: publicUser(user, true) });
 });
 
 app.post("/api/auth/login", authRateLimit, (req, res) => {
@@ -820,8 +851,8 @@ app.post("/api/auth/login", authRateLimit, (req, res) => {
   if (password.length > 128 || !user || !bcrypt.compareSync(password, user.password_hash)) {
     return res.status(401).json({ error: "Invalid username or password." });
   }
-  setSession(res, user.id);
-  res.json({ user: publicUser(user) });
+  setSession(res, user.id, Number(user.session_version || 0));
+  res.json({ user: publicUser(user, true) });
 });
 
 app.post("/api/auth/logout", (_req, res) => {
@@ -829,15 +860,41 @@ app.post("/api/auth/logout", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/me", (req, res) => res.json({ user: publicUser(req.user) }));
+app.get("/api/me", (req, res) => res.json({ user: publicUser(req.user, true) }));
+
+app.put("/api/me/password", requireAuth, (req, res) => {
+  const currentPassword = String(req.body.currentPassword ?? "");
+  const newPassword = String(req.body.newPassword ?? "");
+
+  if (currentPassword.length > 128 || !bcrypt.compareSync(currentPassword, req.user.password_hash)) {
+    return res.status(401).json({ error: "Current password is incorrect." });
+  }
+  if (newPassword.length < 8 || newPassword.length > 128) {
+    return res.status(400).json({ error: "New password must be 8-128 characters." });
+  }
+  if (bcrypt.compareSync(newPassword, req.user.password_hash)) {
+    return res.status(400).json({ error: "New password must be different from the temporary password." });
+  }
+
+  const passwordHash = bcrypt.hashSync(newPassword, 12);
+  db.prepare(`
+    UPDATE users
+    SET password_hash = ?, must_change_password = 0, session_version = session_version + 1
+    WHERE id = ?
+  `).run(passwordHash, req.user.id);
+
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id);
+  setSession(res, user.id, Number(user.session_version || 0));
+  res.json({ ok: true, user: publicUser(user, true) });
+});
 
 app.get("/api/friends", requireAuth, (req, res) => {
   const users = db.prepare("SELECT * FROM users ORDER BY display_name").all();
-  res.json({ users: users.map(publicUser).filter((user) => user.id !== req.user.id) });
+  res.json({ users: users.map((user) => publicUser(user)).filter((user) => user.id !== req.user.id) });
 });
 
 app.get("/api/profile", requireAuth, (req, res) => {
-  res.json({ profile: publicUser(req.user) });
+  res.json({ profile: publicUser(req.user, true) });
 });
 
 app.put("/api/profile", requireAuth, (req, res) => {
@@ -881,7 +938,7 @@ app.put("/api/profile", requireAuth, (req, res) => {
     req.user.id
   );
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id);
-  res.json({ profile: publicUser(user) });
+  res.json({ profile: publicUser(user, true) });
 });
 
 app.get("/api/calendar/subscription", requireAuth, (req, res) => {
@@ -1146,7 +1203,8 @@ app.delete("/api/availability/:id", requireAuth, async (req, res) => {
 });
 
 app.get("/api/events", requireAuth, (_req, res) => {
-  res.json({ events: eventRows() });
+  const nowKey = currentDateTimeKey();
+  res.json({ events: eventRows().filter((event) => isUpcomingEvent(event, nowKey)) });
 });
 
 app.patch("/api/events/:id/invites/me", requireAuth, async (req, res) => {
@@ -1549,11 +1607,11 @@ app.post("/api/events", requireAuth, async (req, res) => {
 });
 
 app.get("/api/dashboard", requireAuth, (req, res) => {
-  const today = dateString(new Date());
   const now = new Date();
-  const nowKey = `${today} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const nowKey = currentDateTimeKey(now);
+  const today = nowKey.slice(0, 10);
   const weekEnd = addDateDays(today, 6);
-  const events = eventRows();
+  const events = eventRows().filter((event) => isUpcomingEvent(event, nowKey));
   const myEvents = events.filter((event) => (
     event.ownerId === req.user.id
     || event.invites.some((invite) => invite.userId === req.user.id && ["accepted", "tentative"].includes(invite.status))
@@ -1593,6 +1651,7 @@ app.get("/api/admin/users", requireAdmin, (_req, res) => {
   const users = db
     .prepare(`
       SELECT u.id, u.username, u.display_name AS displayName, u.role, u.created_at AS createdAt,
+             u.must_change_password AS mustChangePassword,
              COUNT(DISTINCT a.id) AS availabilityCount,
              COUNT(DISTINCT e.id) AS eventCount
       FROM users u
@@ -1617,6 +1676,29 @@ app.patch("/api/admin/users/:id", requireAdmin, (req, res) => {
 
   db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, userId);
   res.json({ ok: true });
+});
+
+app.put("/api/admin/users/:id/password", requireAdmin, (req, res) => {
+  const userId = Number(req.params.id);
+  const temporaryPassword = String(req.body.temporaryPassword ?? "");
+  const account = db.prepare("SELECT id, display_name AS displayName FROM users WHERE id = ?").get(userId);
+
+  if (!account) return res.status(404).json({ error: "Account not found." });
+  if (userId === req.user.id) {
+    return res.status(400).json({ error: "The signed-in admin password cannot be reset from account management." });
+  }
+  if (temporaryPassword.length < 8 || temporaryPassword.length > 128) {
+    return res.status(400).json({ error: "Temporary password must be 8-128 characters." });
+  }
+
+  const passwordHash = bcrypt.hashSync(temporaryPassword, 12);
+  db.prepare(`
+    UPDATE users
+    SET password_hash = ?, must_change_password = 1, session_version = session_version + 1
+    WHERE id = ?
+  `).run(passwordHash, userId);
+
+  res.json({ ok: true, userId, displayName: account.displayName, mustChangePassword: true });
 });
 
 app.get("/api/admin/settings", requireAdmin, (_req, res) => {

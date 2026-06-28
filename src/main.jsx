@@ -13,6 +13,7 @@ import {
   Gamepad2,
   Link,
   LayoutDashboard,
+  KeyRound,
   LogOut,
   Bell,
   MessageSquare,
@@ -73,6 +74,10 @@ function formatDate(value, options = { weekday: "short", day: "numeric", month: 
   return new Intl.DateTimeFormat("en-GB", options).format(new Date(`${value}T12:00:00`));
 }
 
+function eventHasEnded(event, now = new Date()) {
+  return new Date(`${event.date}T${event.endTime}:00`).getTime() <= now.getTime();
+}
+
 function addTime(time, hoursToAdd) {
   const [hours, minutes] = time.split(":").map(Number);
   const total = Math.min((23 * 60) + 59, (hours * 60) + minutes + (hoursToAdd * 60));
@@ -131,8 +136,58 @@ async function api(path, options = {}) {
     ...options
   });
   const payload = await response.json().catch(() => ({}));
+  if (response.status === 401 && !path.startsWith("/api/auth/")) {
+    window.dispatchEvent(new window.Event("squadslot:session-expired"));
+  }
   if (!response.ok) throw new Error(payload.error || "Something went wrong.");
   return payload;
+}
+
+function PasswordChangeScreen({ user, onChanged, onLogout }) {
+  const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [error, setError] = useState("");
+
+  async function submit(event) {
+    event.preventDefault();
+    setError("");
+    if (form.newPassword !== form.confirmPassword) {
+      setError("New passwords do not match.");
+      return;
+    }
+
+    try {
+      const payload = await api("/api/me/password", {
+        method: "PUT",
+        body: JSON.stringify({ currentPassword: form.currentPassword, newPassword: form.newPassword })
+      });
+      onChanged(payload.user);
+    } catch (changeError) {
+      setError(changeError.message);
+    }
+  }
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel password-change-panel">
+        <div className="brand-lockup"><img className="brand-logo" src="/squadslot-logo.png" alt="SquadSlot" /></div>
+        <div className="password-change-heading">
+          <KeyRound size={22} />
+          <div>
+            <h1>Choose a new password</h1>
+            <p>Signed in as {user.displayName}. Replace the temporary password to continue.</p>
+          </div>
+        </div>
+        <form className="auth-form" onSubmit={submit}>
+          <label>Temporary password<input type="password" autoComplete="current-password" value={form.currentPassword} onChange={(event) => setForm({ ...form, currentPassword: event.target.value })} /></label>
+          <label>New password<input type="password" autoComplete="new-password" value={form.newPassword} onChange={(event) => setForm({ ...form, newPassword: event.target.value })} /></label>
+          <label>Confirm new password<input type="password" autoComplete="new-password" value={form.confirmPassword} onChange={(event) => setForm({ ...form, confirmPassword: event.target.value })} /></label>
+          {error && <p className="form-error">{error}</p>}
+          <button className="primary-button" type="submit"><KeyRound size={16} /> Save new password</button>
+        </form>
+        <button className="text-button" type="button" onClick={onLogout}>Sign out</button>
+      </section>
+    </main>
+  );
 }
 
 function AuthScreen({ onSignedIn }) {
@@ -1095,7 +1150,7 @@ function InvitesView({ user, events, refresh }) {
   const invites = events
     .filter((event) => (
       event.ownerId !== user.id
-      && event.invites.some((invite) => invite.userId === user.id)
+      && event.invites.some((invite) => invite.userId === user.id && invite.status === "invited")
     ))
     .map((event) => ({
       ...event,
@@ -1611,6 +1666,8 @@ function AdminView({ user }) {
   const [message, setMessage] = useState({ type: "", text: "" });
   const [notificationMessage, setNotificationMessage] = useState({ type: "", text: "" });
   const [backupMessage, setBackupMessage] = useState("");
+  const [passwordReset, setPasswordReset] = useState({ userId: null, temporaryPassword: "", confirmPassword: "" });
+  const [accountMessage, setAccountMessage] = useState({ type: "", text: "" });
 
   async function load() {
     const [usersPayload, settingsPayload, notificationsPayload, remindersPayload] = await Promise.all([
@@ -1671,6 +1728,36 @@ function AdminView({ user }) {
   async function setRole(id, role) {
     await api(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify({ role }) });
     load();
+  }
+
+  function togglePasswordReset(accountId) {
+    setAccountMessage({ type: "", text: "" });
+    setPasswordReset((current) => ({
+      userId: current.userId === accountId ? null : accountId,
+      temporaryPassword: "",
+      confirmPassword: ""
+    }));
+  }
+
+  async function resetPassword(event, account) {
+    event.preventDefault();
+    setAccountMessage({ type: "", text: "" });
+    if (passwordReset.temporaryPassword !== passwordReset.confirmPassword) {
+      setAccountMessage({ type: "error", text: "Temporary passwords do not match." });
+      return;
+    }
+
+    try {
+      await api(`/api/admin/users/${account.id}/password`, {
+        method: "PUT",
+        body: JSON.stringify({ temporaryPassword: passwordReset.temporaryPassword })
+      });
+      setPasswordReset({ userId: null, temporaryPassword: "", confirmPassword: "" });
+      setAccountMessage({ type: "success", text: `Temporary password set for ${account.displayName}.` });
+      await load();
+    } catch (resetError) {
+      setAccountMessage({ type: "error", text: resetError.message });
+    }
   }
 
   async function saveReminders(event) {
@@ -1735,19 +1822,40 @@ function AdminView({ user }) {
       <div className="admin-grid">
         <section className="table-panel">
           <h2>Accounts</h2>
-          {users.map((account) => (
-            <article className="friend-row" key={account.id}>
-              <div>
-                <strong>{account.displayName}</strong>
-                <span>@{account.username}</span>
-              </div>
-              <div>{account.availabilityCount} free slots</div>
-              <select value={account.role} disabled={account.id === user.id && account.role === "admin"} onChange={(event) => setRole(account.id, event.target.value)}>
-                <option value="user">User</option>
-                <option value="admin">Admin</option>
-              </select>
-            </article>
-          ))}
+          <div className="account-list">
+            {users.map((account) => (
+              <article className="account-card" key={account.id}>
+                <div className="account-summary">
+                  <div className="account-identity">
+                    <strong>{account.displayName}</strong>
+                    <span>@{account.username}</span>
+                    {Boolean(account.mustChangePassword) && <small>Password change required</small>}
+                  </div>
+                  <span className="account-stat">{account.availabilityCount} free slots</span>
+                  <div className="account-controls">
+                    <select aria-label={`Role for ${account.displayName}`} value={account.role} disabled={account.id === user.id && account.role === "admin"} onChange={(event) => setRole(account.id, event.target.value)}>
+                      <option value="user">User</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                    <button className="secondary-button" type="button" disabled={account.id === user.id} onClick={() => togglePasswordReset(account.id)}>
+                      <KeyRound size={16} /> Reset password
+                    </button>
+                  </div>
+                </div>
+                {passwordReset.userId === account.id && (
+                  <form className="account-password-form" onSubmit={(event) => resetPassword(event, account)}>
+                    <label>Temporary password<input type="password" autoComplete="new-password" value={passwordReset.temporaryPassword} onChange={(event) => setPasswordReset({ ...passwordReset, temporaryPassword: event.target.value })} /></label>
+                    <label>Confirm password<input type="password" autoComplete="new-password" value={passwordReset.confirmPassword} onChange={(event) => setPasswordReset({ ...passwordReset, confirmPassword: event.target.value })} /></label>
+                    <div className="settings-actions">
+                      <button className="primary-button" type="submit"><KeyRound size={16} /> Set temporary password</button>
+                      <button className="text-button inline-text-button" type="button" onClick={() => togglePasswordReset(account.id)}>Cancel</button>
+                    </div>
+                  </form>
+                )}
+              </article>
+            ))}
+          </div>
+          {accountMessage.text && <p className={accountMessage.type === "error" ? "form-error" : "muted"}>{accountMessage.text}</p>}
         </section>
         <form className="table-panel admin-form" onSubmit={saveSettings}>
           <h2>Discord</h2>
@@ -1855,6 +1963,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
+  const [clock, setClock] = useState(() => new Date());
   const [data, setData] = useState({ availability: [], events: [], games: [], friends: [], dashboard: null });
 
   const searchGames = useCallback(async (query = "co-op") => {
@@ -1896,11 +2005,22 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (user) {
+    const handleExpiredSession = () => setUser(null);
+    window.addEventListener("squadslot:session-expired", handleExpiredSession);
+    return () => window.removeEventListener("squadslot:session-expired", handleExpiredSession);
+  }, []);
+
+  useEffect(() => {
+    if (user && !user.mustChangePassword) {
       refresh();
       searchGames();
     }
   }, [user, refresh, searchGames]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(new Date()), 30 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -1918,8 +2038,27 @@ function App() {
 
   if (loading) return <main className="loading"><Clock /> Loading</main>;
   if (!user) return <AuthScreen onSignedIn={setUser} />;
+  if (user.mustChangePassword) return <PasswordChangeScreen user={user} onChanged={setUser} onLogout={logout} />;
 
-  const pendingInviteCount = data.events.filter((event) =>
+  const visibleEvents = data.events.filter((event) => !eventHasEnded(event, clock));
+  const visibleData = { ...data, events: visibleEvents };
+  const visibleDashboardInvites = data.dashboard?.pendingInvites.filter((event) => !eventHasEnded(event, clock)) || [];
+  const visibleDashboard = data.dashboard
+    ? {
+        ...data.dashboard,
+        nextEvent: data.dashboard.nextEvent && !eventHasEnded(data.dashboard.nextEvent, clock)
+          ? data.dashboard.nextEvent
+          : null,
+        pendingInvites: visibleDashboardInvites,
+        pendingInviteCount: visibleDashboardInvites.length,
+        tonight: {
+          ...data.dashboard.tonight,
+          events: data.dashboard.tonight.events.filter((event) => !eventHasEnded(event, clock))
+        }
+      }
+    : null;
+
+  const pendingInviteCount = visibleEvents.filter((event) =>
     event.invites.some((invite) => invite.userId === user.id && invite.status === "invited")
   ).length;
 
@@ -1931,11 +2070,11 @@ function App() {
           <Bell size={18} />
           {pendingInviteCount > 0 && <span>{pendingInviteCount}</span>}
         </button>
-        {activeView === "dashboard" && <DashboardView dashboard={data.dashboard} setActiveView={setActiveView} />}
+        {activeView === "dashboard" && <DashboardView dashboard={visibleDashboard} setActiveView={setActiveView} />}
         {activeView === "calendar" && (
           <CalendarView
             user={user}
-            data={data}
+            data={visibleData}
             weekOffset={weekOffset}
             setWeekOffset={setWeekOffset}
             refresh={refresh}
@@ -1943,18 +2082,18 @@ function App() {
             onManageAvailability={() => setActiveView("free-time")}
           />
         )}
-        {activeView === "tonight" && <TonightView dashboard={data.dashboard} setActiveView={setActiveView} />}
+        {activeView === "tonight" && <TonightView dashboard={visibleDashboard} setActiveView={setActiveView} />}
         {activeView === "events" && (
           <EventsView
             user={user}
-            events={data.events}
+            events={visibleEvents}
             refresh={refresh}
             onOpenSubscription={() => setActiveView("profile")}
           />
         )}
-        {activeView === "invites" && <InvitesView user={user} events={data.events} refresh={refresh} />}
+        {activeView === "invites" && <InvitesView user={user} events={visibleEvents} refresh={refresh} />}
         {activeView === "free-time" && <FreeTimeView user={user} availability={data.availability} refresh={refresh} />}
-        {activeView === "friends" && <FriendsView friends={data.friends} availability={data.availability} events={data.events} />}
+        {activeView === "friends" && <FriendsView friends={data.friends} availability={data.availability} events={visibleEvents} />}
         {activeView === "games" && <GamesView games={data.games} searchGames={searchGames} />}
         {activeView === "profile" && <ProfileView user={user} onSaved={setUser} />}
         {activeView === "admin" && user.role === "admin" && <AdminView user={user} />}

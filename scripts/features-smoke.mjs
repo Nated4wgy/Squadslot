@@ -116,12 +116,96 @@ async function main() {
       body: JSON.stringify({ username: "friend", displayName: "Friend", password: "password123" })
     });
     assert(result.response.status === 201, "Friend registration failed.");
-    const friendCookie = result.cookie;
+    let friendCookie = result.cookie;
     const friendId = result.payload.user.id;
+
+    result = await request(`/api/admin/users/${friendId}/password`, adminCookie, {
+      method: "PUT",
+      body: JSON.stringify({ temporaryPassword: "temporary456" })
+    });
+    assert(result.response.ok && result.payload.mustChangePassword, "Admin password reset failed.");
+
+    result = await request(`/api/admin/users/${adminId}/password`, adminCookie, {
+      method: "PUT",
+      body: JSON.stringify({ temporaryPassword: "temporary456" })
+    });
+    assert(result.response.status === 400, "An admin should not reset their own password from account management.");
+
+    result = await request("/api/events", friendCookie);
+    assert(result.response.status === 401, "Password reset did not invalidate the user's existing session.");
+
+    result = await request("/api/auth/login", "", {
+      method: "POST",
+      body: JSON.stringify({ username: "friend", password: "password123" })
+    });
+    assert(result.response.status === 401, "The previous password still worked after an admin reset.");
+
+    result = await request("/api/auth/login", "", {
+      method: "POST",
+      body: JSON.stringify({ username: "friend", password: "temporary456" })
+    });
+    assert(result.response.ok && result.payload.user.mustChangePassword, "Temporary password login did not require a password change.");
+    friendCookie = result.cookie;
+
+    result = await request("/api/profile", friendCookie);
+    assert(
+      result.response.status === 403 && result.payload.code === "PASSWORD_CHANGE_REQUIRED",
+      "Temporary-password sessions were not restricted."
+    );
+
+    result = await request("/api/me/password", friendCookie, {
+      method: "PUT",
+      body: JSON.stringify({ currentPassword: "temporary456", newPassword: "replacement789" })
+    });
+    assert(result.response.ok && !result.payload.user.mustChangePassword, "Forced password change failed.");
+    friendCookie = result.cookie;
+
+    result = await request("/api/auth/login", "", {
+      method: "POST",
+      body: JSON.stringify({ username: "friend", password: "temporary456" })
+    });
+    assert(result.response.status === 401, "Temporary password still worked after replacement.");
+
+    result = await request("/api/admin/users", adminCookie);
+    const resetFriend = result.payload.users.find((account) => account.id === friendId);
+    assert(resetFriend && !resetFriend.mustChangePassword, "Account reset state was not cleared after password replacement.");
+
+    result = await request("/api/friends", adminCookie);
+    const publicFriend = result.payload.users.find((account) => account.id === friendId);
+    assert(
+      publicFriend && !Object.hasOwn(publicFriend, "mustChangePassword"),
+      "Password-change state leaked through the friends API."
+    );
+
     const freeDate = dateAfter(1);
     const eventDate = dateAfter(2);
     const recurringDate = dateAfter(8);
     const unrelatedDate = dateAfter(10);
+
+    result = await request("/api/events", adminCookie, {
+      method: "POST",
+      body: JSON.stringify({
+        title: "Expired legacy session",
+        date: dateAfter(-1),
+        startTime: "19:00",
+        endTime: "21:00",
+        minPlayers: 2,
+        maxPlayers: 4,
+        inviteIds: [friendId],
+        gameTitle: "Past game"
+      })
+    });
+    assert(result.response.status === 201, "Past-event test setup failed.");
+    const pastEventId = result.payload.id;
+
+    result = await request("/api/events", friendCookie);
+    assert(!result.payload.events.some((event) => event.id === pastEventId), "Past event remained in the Events response.");
+
+    result = await request("/api/dashboard", friendCookie);
+    assert(
+      !result.payload.dashboard.pendingInvites.some((event) => event.id === pastEventId),
+      "Past invite remained in the Dashboard response."
+    );
 
     for (const [cookie, note] of [[adminCookie, "Admin free"], [friendCookie, "Friend free"]]) {
       result = await request("/api/availability", cookie, {
@@ -350,6 +434,22 @@ async function main() {
       && !result.payload.includes("cached || caches.match"),
       "Service worker must not replace external Steam images with the app shell."
     );
+
+    result = await request("/api/admin/backup", adminCookie);
+    assert(
+      result.response.ok
+      && result.payload.tables.users.every((account) => (
+        Object.hasOwn(account, "mustChangePassword") && Object.hasOwn(account, "sessionVersion")
+      )),
+      "Backup did not include password reset and session version state."
+    );
+    const backup = result.payload;
+
+    result = await request("/api/admin/backup/restore", adminCookie, {
+      method: "POST",
+      body: JSON.stringify(backup)
+    });
+    assert(result.response.ok, "Backup restore failed with password reset state.");
 
     assert(adminId !== friendId, "Test users should be distinct.");
     console.log("Feature smoke test passed.");

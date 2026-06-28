@@ -13,7 +13,7 @@ SquadSlot is a self-hosted gaming calendar for friend groups. Share free time, f
 - Shared weekly calendar with grouped availability and event details
 - One-off or recurring availability with multi-day drag selection
 - Best-time finder that ranks the strongest player overlap
-- Event invitations shown in the Events tab with accepted, tentative, declined, remove, and leave controls
+- Event invitations shown in Events until accepted, declined, removed, or completed
 - Minimum and maximum player capacity with ready-state notifications
 - Multiple game options, invitee voting, and random tie resolution
 - Steam search-as-you-type with game artwork and details
@@ -21,7 +21,7 @@ SquadSlot is a self-hosted gaming calendar for friend groups. Share free time, f
 - Private live calendar subscriptions for Apple Calendar, Google Calendar, and Outlook
 - Discord webhook updates, reminders, editable templates, and test delivery
 - User profiles, colours, timezones, preferred hours, themes, and avatars
-- Admin account management plus JSON backup and restore
+- Admin account management, temporary password resets, and JSON backup/restore
 - Installable PWA for desktop and mobile home screens
 
 ![SquadSlot shared calendar](docs/screenshots/calendar.png)
@@ -122,6 +122,8 @@ HTTPS is strongly recommended because SquadSlot uses secure session cookies in p
 
 Open SquadSlot and create the first account. It automatically receives the `admin` role. Later registrations are normal user accounts unless an administrator promotes them from the Admin page.
 
+If a user forgets their password, an administrator can open **Admin > Accounts**, choose **Reset password**, and set a temporary password. Existing sessions and the old password are invalidated immediately. After signing in with the temporary password, the user must choose a new password before accessing the rest of SquadSlot.
+
 ## Availability And Scheduling
 
 Availability can be added in several ways:
@@ -183,6 +185,7 @@ Administrators can:
 
 - Promote or demote accounts
 - Delete accounts
+- Set temporary passwords for locked-out users
 - Configure and test Discord
 - Manage notification templates and reminder settings
 - Export and restore a complete JSON backup

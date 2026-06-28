@@ -184,6 +184,12 @@ if (!userColumns.includes("accent")) {
 if (!userColumns.includes("discord_username")) {
   db.exec("ALTER TABLE users ADD COLUMN discord_username TEXT NOT NULL DEFAULT ''");
 }
+if (!userColumns.includes("must_change_password")) {
+  db.exec("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0");
+}
+if (!userColumns.includes("session_version")) {
+  db.exec("ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0");
+}
 
 const eventColumns = db.prepare("PRAGMA table_info(events)").all().map((column) => column.name);
 if (!eventColumns.includes("steam_app_id")) {
@@ -255,9 +261,9 @@ export function setSetting(key, value) {
   `).run(key, value);
 }
 
-export function publicUser(user) {
+export function publicUser(user, includeAuthState = false) {
   if (!user) return null;
-  return {
+  const result = {
     id: user.id,
     username: user.username,
     displayName: user.display_name,
@@ -273,4 +279,6 @@ export function publicUser(user) {
     discordUsername: user.discord_username || "",
     createdAt: user.created_at
   };
+  if (includeAuthState) result.mustChangePassword = Boolean(user.must_change_password);
+  return result;
 }

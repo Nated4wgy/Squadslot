@@ -20,10 +20,16 @@
   box-sizing: border-box;
 }
 
+html {
+  min-width: 320px;
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at 20% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 28rem),
     linear-gradient(135deg, var(--page-bg) 0%, var(--page-bg-2) 100%);
@@ -46,6 +52,22 @@ input,
 select,
 textarea {
   font: inherit;
+  min-width: 0;
+}
+
+img {
+  max-width: 100%;
+}
+
+h1,
+h2,
+h3,
+p,
+strong,
+span,
+small,
+label {
+  overflow-wrap: anywhere;
 }
 
 button {
@@ -72,7 +94,7 @@ button {
 
 .auth-panel h1 {
   margin: 24px 0 10px;
-  font-size: clamp(2rem, 6vw, 3.5rem);
+  font-size: 3.25rem;
   line-height: 1.02;
   letter-spacing: 0;
 }
@@ -117,6 +139,26 @@ button {
 
 .auth-form {
   margin-top: 28px;
+}
+
+.password-change-panel {
+  width: min(560px, 100%);
+}
+
+.password-change-heading {
+  margin-top: 24px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.password-change-heading > div {
+  min-width: 0;
+}
+
+.password-change-heading h1 {
+  margin: 0 0 8px;
+  font-size: 2.35rem;
 }
 
 label {
@@ -311,6 +353,7 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 18px;
   margin: 0 56px 22px 0;
 }
@@ -323,7 +366,12 @@ textarea {
 }
 
 .topbar h1 {
-  font-size: clamp(2.2rem, 5vw, 4.4rem);
+  font-size: 4rem;
+}
+
+.topbar > div:first-child {
+  min-width: 0;
+  flex: 1 1 300px;
 }
 
 .topbar p,
@@ -368,7 +416,16 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 16px;
+}
+
+.section-title > div,
+.drawer-head > div,
+.panel-heading > div,
+.event-title-line > div,
+.invite-row > div:first-child {
+  min-width: 0;
 }
 
 .section-title {
@@ -776,6 +833,7 @@ textarea {
 .detail-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -1201,6 +1259,89 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 420px;
   gap: 20px;
+}
+
+.account-list {
+  display: grid;
+  gap: 10px;
+}
+
+.account-card {
+  min-width: 0;
+  border-radius: 6px;
+  background: rgba(21, 25, 26, 0.06);
+}
+
+.account-summary {
+  min-width: 0;
+  min-height: 64px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.account-identity {
+  min-width: 150px;
+  flex: 1 1 170px;
+}
+
+.account-identity strong,
+.account-identity span,
+.account-identity small {
+  display: block;
+}
+
+.account-identity span,
+.account-stat {
+  color: var(--muted-ink);
+}
+
+.account-identity small {
+  margin-top: 3px;
+  color: #9a4d00;
+  font-weight: 800;
+}
+
+.account-stat {
+  flex: 0 1 auto;
+  font-weight: 750;
+}
+
+.account-controls {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.account-controls select {
+  width: 112px;
+}
+
+.account-controls .secondary-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.account-password-form {
+  padding: 14px;
+  border-top: 1px solid rgba(21, 25, 26, 0.1);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.account-password-form .settings-actions {
+  grid-column: 1 / -1;
+}
+
+.inline-text-button {
+  min-height: 42px;
+  margin: 0;
+  padding: 0 12px;
 }
 
 .admin-form {
@@ -1694,6 +1835,11 @@ textarea {
   display: block;
 }
 
+.event-title-line {
+  min-width: 0;
+  align-items: flex-start;
+}
+
 .event-title-line span,
 .event-title-line small {
   color: var(--muted-ink);
@@ -2040,24 +2186,35 @@ textarea {
 @media (max-width: 1100px) {
   .app-shell {
     grid-template-columns: 1fr;
+    grid-template-rows: max-content minmax(0, 1fr);
+    align-content: start;
   }
 
   .sidebar {
     position: static;
     height: auto;
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr) max-content;
     align-items: center;
     gap: 18px;
-    overflow-x: auto;
+    overflow: visible;
   }
 
   .sidebar nav {
-    grid-auto-flow: column;
-    grid-auto-columns: max-content;
+    min-width: 0;
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
     margin: 0;
   }
 
+  .sidebar nav button {
+    flex: 0 0 auto;
+  }
+
   .profile {
+    min-width: 0;
+    max-width: 260px;
     margin-left: auto;
     margin-top: 0;
     padding-top: 0;
@@ -2083,9 +2240,32 @@ textarea {
     grid-column: 1 / -1;
     justify-content: flex-end;
   }
+
+  .topbar h1 {
+    font-size: 3.25rem;
+  }
 }
 
 @media (min-width: 721px) and (max-width: 900px) {
+  .side-stack,
+  .admin-grid,
+  .games-browser,
+  .dashboard-grid,
+  .tonight-layout,
+  .free-time-layout,
+  .profile-editor,
+  .event-expanded {
+    grid-template-columns: 1fr;
+  }
+
+  .event-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .event-card-actions {
+    justify-content: flex-start;
+  }
+
   .utility-form-compact {
     grid-template-columns: 1fr 1fr;
   }
@@ -2125,22 +2305,51 @@ textarea {
 
   .topbar,
   .section-title,
-  .sidebar,
   .profile {
     align-items: flex-start;
   }
 
-  .topbar,
-  .sidebar {
+  .topbar {
     flex-direction: column;
+  }
+
+  .topbar > div:first-child {
+    width: 100%;
+    flex: 0 1 auto;
+  }
+
+  .sidebar {
+    grid-template-columns: minmax(0, 1fr) max-content;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .sidebar .brand-lockup {
+    grid-column: 1;
+    grid-row: 1;
+    width: max-content;
+    max-width: 100%;
+  }
+
+  .sidebar .brand-logo {
+    width: 160px;
+  }
+
+  .sidebar nav {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+  }
+
+  .sidebar .profile {
+    grid-column: 2;
+    grid-row: 1;
+    width: auto;
+    margin: 0;
   }
 
   .topbar {
     margin-right: 48px;
-  }
-
-  .profile {
-    width: 100%;
   }
 
   .side-stack,
@@ -2160,6 +2369,7 @@ textarea {
 
   .utility-form-compact h3 {
     margin-right: 0;
+    white-space: normal;
   }
 
   .utility-form-compact > * {
@@ -2244,6 +2454,19 @@ textarea {
     justify-content: flex-start;
   }
 
+  .invite-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .account-password-form {
+    grid-template-columns: 1fr;
+  }
+
+  .account-password-form .settings-actions {
+    grid-column: 1;
+  }
+
   .appearance-row {
     grid-template-columns: 1fr;
   }
@@ -2298,5 +2521,61 @@ textarea {
 
   .calendar-grid {
     grid-template-columns: 56px repeat(7, 120px);
+  }
+
+  .topbar h1 {
+    font-size: 2.5rem;
+  }
+
+  .auth-panel {
+    padding: 24px;
+  }
+
+  .auth-panel h1,
+  .password-change-heading h1 {
+    font-size: 2.25rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .workspace,
+  .sidebar {
+    padding: 14px;
+  }
+
+  .sidebar .profile-identity > div {
+    display: none;
+  }
+
+  .topbar {
+    margin-right: 46px;
+  }
+
+  .toolbar {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .toolbar .secondary-button,
+  .toolbar .primary-button {
+    width: 100%;
+  }
+
+  .table-panel,
+  .event-summary,
+  .event-expanded {
+    padding: 14px;
+  }
+
+  .account-controls {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .account-controls select,
+  .account-controls .secondary-button {
+    width: 100%;
   }
 }

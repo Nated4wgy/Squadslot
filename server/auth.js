@@ -16,8 +16,12 @@ function sign(payload) {
   return crypto.createHmac("sha256", secret).update(payload).digest("base64url");
 }
 
-export function createSessionCookie(userId) {
-  const payload = base64url(JSON.stringify({ userId, exp: Date.now() + 1000 * 60 * 60 * 24 * 30 }));
+export function createSessionCookie(userId, sessionVersion = 0) {
+  const payload = base64url(JSON.stringify({
+    userId,
+    sessionVersion,
+    exp: Date.now() + 1000 * 60 * 60 * 24 * 30
+  }));
   return `${payload}.${sign(payload)}`;
 }
 
@@ -31,14 +35,17 @@ export function readSessionCookie(req) {
   try {
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     if (!parsed.userId || parsed.exp < Date.now()) return null;
-    return parsed.userId;
+    return {
+      userId: parsed.userId,
+      sessionVersion: Number(parsed.sessionVersion || 0)
+    };
   } catch {
     return null;
   }
 }
 
-export function setSession(res, userId) {
-  res.cookie(COOKIE_NAME, createSessionCookie(userId), {
+export function setSession(res, userId, sessionVersion = 0) {
+  res.cookie(COOKIE_NAME, createSessionCookie(userId, sessionVersion), {
     httpOnly: true,
     sameSite: "strict",
     secure: process.env.NODE_ENV === "production",
