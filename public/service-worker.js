@@ -1,8 +1,8 @@
-const cacheName = "squadslot-shell-v2";
+const cacheName = "squadslot-shell-v3";
 const shellAssets = [
   "/",
   "/manifest.webmanifest",
-  "/squadslot-logo.png",
+  "/squadslot-logo-transparent.png",
   "/squadslot-icon.png",
   "/squadslot-192.png",
   "/squadslot-512.png"

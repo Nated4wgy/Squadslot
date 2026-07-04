@@ -3,8 +3,10 @@ import { createRoot } from "react-dom/client";
 import {
   CalendarDays,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Clock,
   Copy,
   Download,
@@ -18,7 +20,6 @@ import {
   Bell,
   MessageSquare,
   Moon,
-  MousePointer2,
   Plus,
   Repeat,
   RefreshCw,
@@ -36,7 +37,11 @@ import {
 } from "lucide-react";
 import "./styles.css";
 
-const hours = ["18:00", "19:00", "20:00", "21:00", "22:00", "23:00"];
+const calendarStartHour = 17;
+const calendarEndHour = 24;
+const hours = Array.from({ length: calendarEndHour - calendarStartHour }, (_, index) => (
+  `${String(calendarStartHour + index).padStart(2, "0")}:00`
+));
 
 function startOfWeek(date = new Date()) {
   const day = date.getDay() || 7;
@@ -82,6 +87,21 @@ function addTime(time, hoursToAdd) {
   const [hours, minutes] = time.split(":").map(Number);
   const total = Math.min((23 * 60) + 59, (hours * 60) + minutes + (hoursToAdd * 60));
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function timeMinutes(time) {
+  const [hour, minute] = time.split(":").map(Number);
+  return (hour * 60) + minute;
+}
+
+function calendarPlacement(startTime, endTime) {
+  const start = Math.max(calendarStartHour * 60, timeMinutes(startTime));
+  const end = Math.min(calendarEndHour * 60, timeMinutes(endTime));
+  const total = (calendarEndHour - calendarStartHour) * 60;
+  return {
+    top: `${((start - (calendarStartHour * 60)) / total) * 100}%`,
+    height: `${Math.max(0, ((end - start) / total) * 100)}%`
+  };
 }
 
 function eventDurationHours(event) {
@@ -173,7 +193,7 @@ function PasswordChangeScreen({ user, onChanged, onLogout }) {
   return (
     <main className="auth-shell">
       <section className="auth-panel password-change-panel">
-        <div className="brand-lockup"><img className="brand-logo" src="/squadslot-logo.png" alt="SquadSlot" /></div>
+        <div className="brand-lockup"><img className="brand-logo" src="/squadslot-logo-transparent.png" alt="SquadSlot" /></div>
         <div className="password-change-heading">
           <KeyRound size={22} />
           <div>
@@ -221,7 +241,7 @@ function AuthScreen({ onSignedIn }) {
     <main className="auth-shell">
       <section className="auth-panel">
         <div className="brand-lockup">
-          <img className="brand-logo" src="/squadslot-logo.png" alt="SquadSlot" />
+          <img className="brand-logo" src="/squadslot-logo-transparent.png" alt="SquadSlot" />
         </div>
         <h1>Plan the next session without the chat scroll.</h1>
         <p>{mode === "register" ? "The first account created becomes the admin." : "Sign in to see the group calendar."}</p>
@@ -270,7 +290,7 @@ function Sidebar({ user, activeView, setActiveView, onLogout }) {
   return (
     <aside className="sidebar">
       <div className="brand-lockup compact">
-        <img className="brand-logo" src="/squadslot-logo.png" alt="SquadSlot" />
+        <img className="brand-logo" src="/squadslot-logo-transparent.png" alt="SquadSlot" />
       </div>
       <nav>
         {nav.map(([id, label, Icon]) => (
@@ -332,18 +352,77 @@ function AvailabilityPopover({ freeItems }) {
   );
 }
 
+function samePlayers(left, right) {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
+function availabilityBlocksForDay(date, availability, events, bestSlots) {
+  const dayAvailability = availability.filter((item) => item.date === date);
+  const dayEvents = events.filter((item) => item.date === date);
+  const minMinute = calendarStartHour * 60;
+  const maxMinute = calendarEndHour * 60;
+  const boundaries = new Set([minMinute, maxMinute]);
+
+  for (const item of [...dayAvailability, ...dayEvents]) {
+    boundaries.add(Math.max(minMinute, Math.min(maxMinute, timeMinutes(item.startTime))));
+    boundaries.add(Math.max(minMinute, Math.min(maxMinute, timeMinutes(item.endTime))));
+  }
+  for (let hour = calendarStartHour; hour <= calendarEndHour; hour += 1) boundaries.add(hour * 60);
+
+  const ordered = [...boundaries].sort((a, b) => a - b);
+  const bestMinutes = bestSlots.filter((slot) => slot.date === date).map((slot) => timeMinutes(slot.startTime));
+  const blocks = [];
+
+  for (let index = 0; index < ordered.length - 1; index += 1) {
+    const start = ordered[index];
+    const end = ordered[index + 1];
+    if (start >= end || end <= minMinute || start >= maxMinute) continue;
+    const committed = new Set(
+      dayEvents
+        .filter((event) => timeMinutes(event.startTime) < end && timeMinutes(event.endTime) > start)
+        .flatMap((event) => event.invites
+          .filter((invite) => ["accepted", "tentative"].includes(invite.status))
+          .map((invite) => invite.userId))
+    );
+    const freeItems = [...new Map(
+      dayAvailability
+        .filter((item) => timeMinutes(item.startTime) < end && timeMinutes(item.endTime) > start && !committed.has(item.userId))
+        .map((item) => [item.userId, item])
+    ).values()];
+    if (freeItems.length === 0) continue;
+    const playerIds = freeItems.map((item) => item.userId).sort((a, b) => a - b);
+    const isBest = bestMinutes.some((minute) => minute >= start && minute < end);
+    const previous = blocks.at(-1);
+
+    if (previous && previous.end === start && previous.isBest === isBest && samePlayers(previous.playerIds, playerIds)) {
+      previous.end = end;
+    } else {
+      blocks.push({ start, end, freeItems, playerIds, isBest });
+    }
+  }
+  return blocks;
+}
+
+function minutesLabel(value) {
+  if (value >= calendarEndHour * 60) return "24:00";
+  return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
+}
+
 function CalendarGrid({ user, days, availability, events, bestSlots, onAvailabilityDraft, onReschedule }) {
   const [dragSelection, setDragSelection] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const today = localDate(new Date());
+    const visibleDates = new Set(days.map(localDate));
+    return visibleDates.has(today) ? today : events.find((event) => visibleDates.has(event.date))?.date || localDate(days[0]);
+  });
 
-  function committedInviteUserIds(dayEvents) {
-    return new Set(
-      dayEvents.flatMap((event) =>
-        event.invites
-          .filter((invite) => ["accepted", "tentative"].includes(invite.status))
-          .map((invite) => invite.userId)
-      )
-    );
-  }
+  useEffect(() => {
+    const visibleDates = new Set(days.map(localDate));
+    if (!visibleDates.has(selectedDate)) {
+      const today = localDate(new Date());
+      setSelectedDate(visibleDates.has(today) ? today : events.find((event) => visibleDates.has(event.date))?.date || localDate(days[0]));
+    }
+  }, [days, events, selectedDate]);
 
   function finishAvailabilityDrag() {
     if (!dragSelection) return;
@@ -372,153 +451,136 @@ function CalendarGrid({ user, days, availability, events, bestSlots, onAvailabil
     return () => window.removeEventListener("mouseup", handleMouseUp);
   });
 
-  const bestKeys = new Set(bestSlots.filter((slot) => slot.count === bestSlots[0]?.count).map((slot) => `${slot.date}-${slot.startTime}`));
   const maxOverlap = Math.max(1, ...bestSlots.map((slot) => slot.count));
 
   return (
-    <section className="calendar-panel">
-      <div className="section-title">
+    <section className="calendar-panel pulse-calendar-panel">
+      <div className="best-slot-runway">
+        <strong><Sparkles size={16} /> Best slots this week</strong>
         <div>
-          <h2>Shared calendar</h2>
-          <p>Availability and invites for this week.</p>
-        </div>
-        <div className="calendar-title-actions">
-          <span className="calendar-drag-hint"><MousePointer2 size={15} /> Drag to add</span>
-          <span className="live-chip"><Sparkles size={15} /> Tonight</span>
+          {bestSlots.slice(0, 3).map((slot, index) => (
+            <button
+              type="button"
+              onClick={() => onAvailabilityDraft({ mode: "once", date: slot.date, startTime: slot.startTime, endTime: slot.endTime })}
+              key={`${slot.date}-${slot.startTime}`}
+            >
+              <span>{index + 1}</span>
+              <b>{formatDate(slot.date, { weekday: "short" })} {slot.startTime}</b>
+              <small>{slot.count} free</small>
+            </button>
+          ))}
+          {bestSlots.length === 0 ? <small className="runway-empty">Add availability to reveal the strongest overlap.</small> : null}
         </div>
       </div>
-      <div className="calendar-grid">
-        <div className="time-col" />
-        {days.map((day) => <div className="day-head" key={localDate(day)}>{formatDay(day)}</div>)}
-        {hours.map((hour) => (
-          <React.Fragment key={hour}>
-            <div className="time-cell">{hour}</div>
+      <div className={`pulse-calendar-scroll pulse-days-${days.length}`}>
+        <div className="pulse-week-head">
+          <span />
+          {days.map((day) => {
+            const date = localDate(day);
+            return <button className={date === selectedDate ? "selected" : ""} onClick={() => setSelectedDate(date)} key={date}>{formatDay(day)}</button>;
+          })}
+        </div>
+        <div className="pulse-calendar-body">
+          <div className="pulse-time-axis">
+            {Array.from({ length: (calendarEndHour - calendarStartHour) + 1 }, (_, index) => (
+              <span style={{ top: `${(index / (calendarEndHour - calendarStartHour)) * 100}%` }} key={index}>
+                {String(calendarStartHour + index).padStart(2, "0")}:00
+              </span>
+            ))}
+          </div>
+          <div className="pulse-day-grid">
             {days.map((day, dayIndex) => {
               const date = localDate(day);
-              const dayAvailability = availability.filter((item) => item.date === date && item.startTime <= hour && item.endTime > hour);
-              const dayEvents = events.filter((item) => item.date === date && item.startTime <= hour && item.endTime > hour);
-              const committedUsers = committedInviteUserIds(dayEvents);
-              const freeItems = [...new Map(
-                dayAvailability
-                  .filter((item) => !committedUsers.has(item.userId))
-                  .map((item) => [item.userId, item])
-              ).values()];
-              const freeNames = [...new Set(freeItems.map((item) => item.displayName))];
-              const slotKey = `${date}-${hour}`;
-              const overlap = freeNames.length / maxOverlap;
-              const hourNumber = Number(hour.slice(0, 2));
-              const selected = dragSelection
-                && dayIndex >= Math.min(dragSelection.startDayIndex, dragSelection.endDayIndex)
-                && dayIndex <= Math.max(dragSelection.startDayIndex, dragSelection.endDayIndex)
-                && hourNumber >= Math.min(dragSelection.startHour, dragSelection.endHour)
-                && hourNumber <= Math.max(dragSelection.startHour, dragSelection.endHour);
+              const dayEvents = events.filter((item) => item.date === date && timeMinutes(item.endTime) > calendarStartHour * 60 && timeMinutes(item.startTime) < calendarEndHour * 60);
+              const availabilityBlocks = availabilityBlocksForDay(date, availability, events, bestSlots);
               return (
-                <div
-                  className={`slot selectable-slot${bestKeys.has(slotKey) ? " best-slot" : ""}${selected ? " selecting-slot" : ""}`}
-                  key={slotKey}
-                  data-calendar-slot
-                  data-date={date}
-                  data-hour={hour}
-                  title={`Drag from here to add availability on ${formatDay(day)} at ${hour}`}
-                  style={{ "--overlap-strength": `${Math.round(overlap * 18)}%` }}
-                  onMouseDown={(event) => {
-                    if (event.button !== 0 || event.target.closest(".event-block, .availability-block")) return;
-                    event.preventDefault();
-                    setDragSelection({
-                      startDayIndex: dayIndex,
-                      endDayIndex: dayIndex,
-                      startHour: hourNumber,
-                      endHour: hourNumber
-                    });
-                  }}
-                  onMouseEnter={() => {
-                    setDragSelection((current) => current
-                      ? { ...current, endDayIndex: dayIndex, endHour: hourNumber }
-                      : current);
-                  }}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    const eventId = Number(event.dataTransfer.getData("text/event-id"));
-                    const duration = Number(event.dataTransfer.getData("text/event-duration")) || 1;
-                    if (eventId) onReschedule(eventId, date, hour, addTime(hour, duration));
-                  }}
-                >
-                  {freeNames.length > 0 && (
-                    <div className="availability-block availability-group availability-with-popover" tabIndex={0}>
-                      <strong>{bestKeys.has(slotKey) && <Sparkles size={12} />} {freeNames.length} free</strong>
-                      <span>{freeNames.slice(0, 3).join(", ")}{freeNames.length > 3 ? ` +${freeNames.length - 3}` : ""}</span>
-                      <AvailabilityPopover freeItems={freeItems} />
-                    </div>
-                  )}
-                  {dayEvents.slice(0, 2).map((item) => {
-                    const accepted = item.invites.filter((invite) => invite.status === "accepted");
-                    const tentative = item.invites.filter((invite) => invite.status === "tentative");
-                    const canMove = item.ownerId === user.id || user.role === "admin";
-                    return (
-                    <div
-                      className={`event-block event-with-popover${item.ready ? " event-ready" : ""}`}
-                      key={`e-${item.id}`}
-                      tabIndex={0}
-                      draggable={canMove}
-                      onDragStart={(event) => {
-                        event.stopPropagation();
-                        event.dataTransfer.setData("text/event-id", String(item.id));
-                        event.dataTransfer.setData("text/event-duration", String(eventDurationHours(item)));
-                      }}
-                    >
-                      <strong>{item.title}</strong>
-                      <span>{item.gameTitle || "Game TBD"}</span>
-                      <small>{item.ready && <Sparkles size={11} />} {accepted.length}/{item.maxPlayers} accepted{tentative.length ? `, ${tentative.length} tentative` : ""}</small>
-                      <EventPopover event={item} />
-                    </div>
-                    );
-                  })}
+                <div className={`pulse-day-column${date === selectedDate ? " selected" : ""}`} key={date}>
+                  <div className="pulse-hour-slots">
+                    {hours.map((hour) => {
+                      const hourNumber = Number(hour.slice(0, 2));
+                      const selected = dragSelection
+                        && dayIndex >= Math.min(dragSelection.startDayIndex, dragSelection.endDayIndex)
+                        && dayIndex <= Math.max(dragSelection.startDayIndex, dragSelection.endDayIndex)
+                        && hourNumber >= Math.min(dragSelection.startHour, dragSelection.endHour)
+                        && hourNumber <= Math.max(dragSelection.startHour, dragSelection.endHour);
+                      return <div
+                        className={`pulse-hour-slot${selected ? " selecting" : ""}`}
+                        key={`${date}-${hour}`}
+                        data-calendar-slot
+                        data-date={date}
+                        data-hour={hour}
+                        title={`Drag from here to add availability on ${formatDay(day)} at ${hour}`}
+                        onMouseDown={(event) => {
+                          if (event.button !== 0 || event.target.closest(".event-block, .availability-block")) return;
+                          event.preventDefault();
+                          setDragSelection({ startDayIndex: dayIndex, endDayIndex: dayIndex, startHour: hourNumber, endHour: hourNumber });
+                        }}
+                        onMouseEnter={() => setDragSelection((current) => current ? { ...current, endDayIndex: dayIndex, endHour: hourNumber } : current)}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          const eventId = Number(event.dataTransfer.getData("text/event-id"));
+                          const duration = Number(event.dataTransfer.getData("text/event-duration")) || 1;
+                          if (eventId) onReschedule(eventId, date, hour, addTime(hour, duration));
+                        }}
+                      />;
+                    })}
+                  </div>
+                  <div className="pulse-block-layer">
+                    {availabilityBlocks.map((block) => {
+                      const placement = calendarPlacement(minutesLabel(block.start), minutesLabel(block.end));
+                      const overlap = block.freeItems.length / maxOverlap;
+                      return <div
+                        className={`availability-block pulse-availability-block availability-with-popover${block.isBest ? " best" : ""}`}
+                        style={{ ...placement, "--overlap-opacity": 0.32 + (overlap * 0.48) }}
+                        tabIndex={0}
+                        key={`${date}-${block.start}-${block.playerIds.join("-")}`}
+                      >
+                        <strong>{block.freeItems.length} free {block.isBest ? <Check size={12} /> : null}</strong>
+                        <div className="pulse-avatar-row">
+                          {block.freeItems.slice(0, 3).map((item) => <Avatar user={item} size="tiny" key={item.userId} />)}
+                          {block.freeItems.length > 3 ? <span>+{block.freeItems.length - 3}</span> : null}
+                        </div>
+                        <AvailabilityPopover freeItems={block.freeItems} />
+                      </div>;
+                    })}
+                    {dayEvents.map((item, eventIndex) => {
+                      const accepted = item.invites.filter((invite) => invite.status === "accepted");
+                      const canMove = item.ownerId === user.id || user.role === "admin";
+                      const selectedOption = item.gameOptions.find((option) => option.id === item.selectedGameOptionId) || item.gameOptions.find((option) => option.imageUrl);
+                      const placement = calendarPlacement(item.startTime, item.endTime);
+                      return <div
+                        className={`event-block pulse-event-block event-with-popover${item.ready ? " event-ready" : ""}`}
+                        style={{ ...placement, "--event-offset": `${Math.min(eventIndex, 2) * 5}px` }}
+                        key={`e-${item.id}`}
+                        tabIndex={0}
+                        draggable={canMove}
+                        onDragStart={(event) => {
+                          event.stopPropagation();
+                          event.dataTransfer.setData("text/event-id", String(item.id));
+                          event.dataTransfer.setData("text/event-duration", String(eventDurationHours(item)));
+                        }}
+                      >
+                        {selectedOption?.imageUrl ? <SteamImage src={selectedOption.imageUrl} className="pulse-event-art" /> : null}
+                        <div className="pulse-event-copy">
+                          <strong>{item.title}</strong>
+                          <span>{item.gameTitle || "Game TBD"}</span>
+                          <small><UsersRound size={12} /> {accepted.length}/{item.maxPlayers} accepted</small>
+                        </div>
+                        {item.ready ? <span className="ready-mark"><Check size={13} /></span> : null}
+                        <div className="pulse-event-avatars">
+                          {accepted.slice(0, 3).map((invite) => <Avatar user={invite} size="tiny" key={invite.userId} />)}
+                          {accepted.length > 3 ? <span>+{accepted.length - 3}</span> : null}
+                        </div>
+                        <EventPopover event={item} />
+                      </div>;
+                    })}
+                  </div>
                 </div>
               );
             })}
-          </React.Fragment>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function EventList({ user, events, refresh }) {
-  async function removeEvent(eventId) {
-    await api(`/api/events/${eventId}`, { method: "DELETE" });
-    refresh();
-  }
-
-  if (events.length === 0) {
-    return (
-      <section className="table-panel">
-        <h3>Sessions</h3>
-        <p className="muted">No sessions created yet.</p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="table-panel">
-      <h3>Sessions</h3>
-      <div className="session-list">
-        {events.slice(0, 8).map((event) => {
-          const canDelete = event.ownerId === user.id || user.role === "admin";
-          return (
-            <article className="session-row" key={event.id}>
-              <div>
-                <strong>{event.title}</strong>
-                <span>{event.gameTitle || "Game TBD"} - {event.date}, {event.startTime} to {event.endTime}</span>
-              </div>
-              {canDelete && (
-                <button className="danger-button" onClick={() => removeEvent(event.id)} aria-label={`Remove ${event.title}`}>
-                  <Trash2 size={16} />
-                </button>
-              )}
-            </article>
-          );
-        })}
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -877,7 +939,7 @@ function FreeTimeView({ user, availability, refresh }) {
   );
 }
 
-function EventForm({ games, friends, selectedDate, onSearchGames, onCreated }) {
+function EventForm({ games, friends, selectedDate, onSearchGames, onCreated, expanded, onToggle }) {
   const [form, setForm] = useState({
     title: "New session",
     steamAppId: "",
@@ -916,6 +978,7 @@ function EventForm({ games, friends, selectedDate, onSearchGames, onCreated }) {
     event.preventDefault();
     await api("/api/events", { method: "POST", body: JSON.stringify(form) });
     onCreated();
+    onToggle(false);
   }
 
   function toggleFriend(id) {
@@ -926,87 +989,86 @@ function EventForm({ games, friends, selectedDate, onSearchGames, onCreated }) {
   }
 
   return (
-    <form className="session-drawer" onSubmit={submit}>
-      <div className="drawer-head">
-        <div>
-          <h3>New session</h3>
-          <p>Search Steam, pick a game, invite friends.</p>
-        </div>
-        <Plus size={18} />
-      </div>
-      <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
-      <div className="search-inline">
-        <input placeholder="Search Steam" value={query} onChange={(event) => setQuery(event.target.value)} />
-        <button type="button" onClick={() => onSearchGames(query)} aria-label="Search games"><Search size={17} /></button>
-      </div>
-      <div className="game-option-picker">
-        <select value={form.steamAppId} onChange={(event) => chooseGame(event.target.value)}>
-          <option value="">Pick a Steam game</option>
-          {games.map((game) => <option value={game.appId} key={game.appId}>{game.title}</option>)}
-        </select>
-        <button type="button" onClick={addGameOption} aria-label="Add game option"><Plus size={17} /></button>
-      </div>
-      <div className="game-option-chips">
-        {form.gameOptions.map((option) => (
-          <button
-            type="button"
-            key={option.steamAppId}
-            onClick={() => setForm({ ...form, gameOptions: form.gameOptions.filter((item) => item.steamAppId !== option.steamAppId) })}
-          >
-            {option.title} <span>×</span>
-          </button>
-        ))}
-        {form.gameOptions.length === 0 && <small>Add one or more games for invitees to vote on.</small>}
-      </div>
-      <input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} />
-      <div className="two-col">
-        <input type="time" value={form.startTime} onChange={(event) => setForm({ ...form, startTime: event.target.value })} />
-        <input type="time" value={form.endTime} onChange={(event) => setForm({ ...form, endTime: event.target.value })} />
-      </div>
-      <div className="two-col">
-        <label>Minimum players<input type="number" min="1" max="100" value={form.minPlayers} onChange={(event) => setForm({ ...form, minPlayers: Number(event.target.value) })} /></label>
-        <label>Maximum players<input type="number" min={form.minPlayers} max="100" value={form.maxPlayers} onChange={(event) => setForm({ ...form, maxPlayers: Number(event.target.value) })} /></label>
-      </div>
-      <label>RSVP deadline<input type="datetime-local" value={form.rsvpDeadline} onChange={(event) => setForm({ ...form, rsvpDeadline: event.target.value })} /></label>
-      <textarea placeholder="Session notes, server details, mods, or voice channel" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
-      <div className="invite-list">
-        <span>Invite friends</span>
-        {friends.length === 0 && <small>No other accounts yet.</small>}
-        {friends.map((friend) => (
-          <button type="button" className={form.inviteIds.includes(friend.id) ? "selected" : ""} onClick={() => toggleFriend(friend.id)} key={friend.id}>
-            {friend.displayName}
-          </button>
-        ))}
-      </div>
-      <button className="primary-button" type="submit"><Send size={16} /> Create invite</button>
+    <form className={`pulse-session-dock${expanded ? " expanded" : ""}`} id="pulse-session-composer" onSubmit={submit}>
+      <button className="pulse-dock-label" type="button" onClick={() => onToggle(!expanded)}><Plus size={18} /><span>New session</span></button>
+      <label><span>Date</span><input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
+      <label className="pulse-time-field"><span>Time</span><div><input type="time" value={form.startTime} onChange={(event) => setForm({ ...form, startTime: event.target.value })} /><i>-</i><input type="time" value={form.endTime} onChange={(event) => setForm({ ...form, endTime: event.target.value })} /></div></label>
+      <label className="pulse-game-field"><span>Game</span><select value={form.steamAppId} onChange={(event) => chooseGame(event.target.value)}><option value="">Select a game</option>{games.map((game) => <option value={game.appId} key={game.appId}>{game.title}</option>)}</select></label>
+      <button className="pulse-invite-trigger" type="button" onClick={() => onToggle(true)}><UsersRound size={17} /> {form.inviteIds.length ? `${form.inviteIds.length} invited` : "Select players"}</button>
+      <button className="pulse-create-session" type="submit"><Send size={16} /> Create session</button>
+      <button className="pulse-expand-dock" type="button" onClick={() => onToggle(!expanded)} aria-label={expanded ? "Collapse session options" : "Expand session options"}>{expanded ? <ChevronDown size={18} /> : <ChevronUp size={18} />}</button>
+      {expanded ? <div className="pulse-session-details">
+        <label>Session title<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
+        <label>Search Steam<div className="search-inline"><input placeholder="Search Steam" value={query} onChange={(event) => setQuery(event.target.value)} /><button type="button" onClick={() => onSearchGames(query)} aria-label="Search games"><Search size={17} /></button></div></label>
+        <div className="pulse-game-options"><button className="secondary-button" type="button" onClick={addGameOption}><Plus size={16} /> Add voting option</button><div className="game-option-chips">{form.gameOptions.map((option) => <button type="button" key={option.steamAppId} onClick={() => setForm({ ...form, gameOptions: form.gameOptions.filter((item) => item.steamAppId !== option.steamAppId) })}>{option.title} <span>×</span></button>)}{form.gameOptions.length === 0 ? <small>Add multiple games if invitees should vote.</small> : null}</div></div>
+        <div className="two-col"><label>Minimum players<input type="number" min="1" max="100" value={form.minPlayers} onChange={(event) => setForm({ ...form, minPlayers: Number(event.target.value) })} /></label><label>Maximum players<input type="number" min={form.minPlayers} max="100" value={form.maxPlayers} onChange={(event) => setForm({ ...form, maxPlayers: Number(event.target.value) })} /></label></div>
+        <label>RSVP deadline<input type="datetime-local" value={form.rsvpDeadline} onChange={(event) => setForm({ ...form, rsvpDeadline: event.target.value })} /></label>
+        <label>Session notes<textarea placeholder="Server details, mods, DLC, or voice channel" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+        <div className="invite-list"><span>Invite friends</span>{friends.length === 0 ? <small>No other accounts yet.</small> : null}{friends.map((friend) => <button type="button" className={form.inviteIds.includes(friend.id) ? "selected" : ""} onClick={() => toggleFriend(friend.id)} key={friend.id}><Avatar user={friend} size="tiny" /> {friend.displayName}</button>)}</div>
+      </div> : null}
     </form>
   );
 }
 
-function BestTimePanel({ slots, onUse }) {
+function calendarRangeLabel(days) {
+  const start = days[0];
+  const end = days.at(-1);
+  const startMonth = new Intl.DateTimeFormat("en-GB", { month: "long" }).format(start);
+  const endMonth = new Intl.DateTimeFormat("en-GB", { month: "long" }).format(end);
+  return startMonth === endMonth
+    ? `${start.getDate()}-${end.getDate()} ${endMonth}`
+    : `${start.getDate()} ${startMonth}-${end.getDate()} ${endMonth}`;
+}
+
+function CalendarUtilityRail({ availability, events, onOpenEvents, onManageAvailability }) {
+  const [tonightOpen, setTonightOpen] = useState(true);
+  const [upcomingOpen, setUpcomingOpen] = useState(true);
+  const today = localDate(new Date());
+  const nowTime = new Date().toTimeString().slice(0, 5);
+  const todayItems = availability.filter((item) => item.date === today && item.endTime > nowTime);
+  const visibleItems = todayItems.some((item) => item.startTime <= nowTime)
+    ? todayItems.filter((item) => item.startTime <= nowTime)
+    : todayItems;
+  const freePlayers = [...new Map(visibleItems.map((item) => [item.userId, item])).values()];
+  const upcoming = events.slice(0, 3);
+
   return (
-    <section className="table-panel best-times-panel">
-      <div className="panel-heading"><Sparkles size={18} /><div><h3>Best slots this week</h3><p>Strongest availability overlap.</p></div></div>
-      {slots.length === 0 && <p className="muted">Log availability to reveal the best times.</p>}
-      <div className="best-time-list">
-        {slots.slice(0, 5).map((slot, index) => (
-          <button type="button" onClick={() => onUse(slot)} key={`${slot.date}-${slot.startTime}`}>
-            <span className="rank">{index + 1}</span>
-            <span><strong>{formatDate(slot.date)}</strong><small>{slot.startTime}-{slot.endTime}</small></span>
-            <span className="overlap-count">{slot.count} free</span>
-          </button>
-        ))}
-      </div>
-    </section>
+    <aside className="pulse-utility-rail">
+      <section>
+        <button className="pulse-rail-heading" type="button" onClick={() => setTonightOpen(!tonightOpen)}><span><Zap size={18} /> Tonight</span>{tonightOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
+        {tonightOpen ? <div className="pulse-free-list">
+          <div className="pulse-rail-summary"><span>Free players</span><strong>{freePlayers.length} online</strong></div>
+          {freePlayers.slice(0, 6).map((player) => <div className="pulse-free-person" key={player.userId}><Avatar user={player} size="small" /><strong>{player.displayName}</strong><span>{player.startTime <= nowTime ? "Free" : player.startTime}</span></div>)}
+          {freePlayers.length === 0 ? <p>No availability logged for tonight.</p> : null}
+          <button className="pulse-rail-action" type="button" onClick={onManageAvailability}>Manage free time</button>
+        </div> : null}
+      </section>
+      <section>
+        <button className="pulse-rail-heading" type="button" onClick={() => setUpcomingOpen(!upcomingOpen)}><span><Clock size={18} /> Upcoming</span>{upcomingOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
+        {upcomingOpen ? <div className="pulse-upcoming-list">
+          {upcoming.map((event) => {
+            const accepted = event.invites.filter((invite) => invite.status === "accepted");
+            const selectedOption = event.gameOptions.find((option) => option.id === event.selectedGameOptionId) || event.gameOptions.find((option) => option.imageUrl);
+            return <article key={event.id}>{selectedOption?.imageUrl ? <SteamImage src={selectedOption.imageUrl} /> : <span className="image-fallback"><Gamepad2 size={18} /></span>}<div><strong>{event.title}</strong><span>{formatDate(event.date)} - {event.startTime}</span><small><UsersRound size={12} /> {accepted.length}/{event.maxPlayers} accepted</small></div>{event.ready ? <i><Check size={12} /></i> : null}</article>;
+          })}
+          {upcoming.length === 0 ? <p>No sessions planned.</p> : null}
+          <button className="pulse-view-events" type="button" onClick={onOpenEvents}>View all events</button>
+        </div> : null}
+      </section>
+    </aside>
   );
 }
 
-function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, searchGames, onManageAvailability }) {
+function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, searchGames, onManageAvailability, onOpenEvents }) {
   const weekStart = useMemo(() => addDays(startOfWeek(), weekOffset * 7), [weekOffset]);
   const days = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)), [weekStart]);
   const [bestSlots, setBestSlots] = useState([]);
   const [availabilityDraft, setAvailabilityDraft] = useState(null);
+  const [availabilityOpen, setAvailabilityOpen] = useState(false);
+  const [sessionComposerOpen, setSessionComposerOpen] = useState(false);
+  const [dayCount, setDayCount] = useState(7);
   const [transitionDirection, setTransitionDirection] = useState("next");
+  const visibleDays = useMemo(() => days.slice(0, dayCount), [days, dayCount]);
 
   useEffect(() => {
     const start = localDate(days[0]);
@@ -1026,76 +1088,54 @@ function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, searchGa
     refresh();
   }
 
+  function openAvailability(draft = null) {
+    setAvailabilityDraft(draft);
+    setAvailabilityOpen(true);
+    window.requestAnimationFrame(() => document.querySelector(".pulse-dock-stack .availability-composer")?.scrollIntoView({ behavior: "smooth", block: "end" }));
+  }
+
+  function openSessionComposer() {
+    setSessionComposerOpen(true);
+    window.requestAnimationFrame(() => document.getElementById("pulse-session-composer")?.scrollIntoView({ behavior: "smooth", block: "end" }));
+  }
+
   return (
-    <>
-      <header className="topbar">
-        <div>
-          <h1>Calendar</h1>
-          <p>{formatDay(days[0])} to {formatDay(days[6])}</p>
+    <section className="pulse-calendar-page">
+      <header className="pulse-calendar-toolbar">
+        <h1>Calendar</h1>
+        <div className="pulse-date-nav">
+          <button className="icon-button" onClick={() => moveWeek(-1)} aria-label="Previous week"><ChevronLeft size={19} /></button>
+          <strong>{calendarRangeLabel(days)}</strong>
+          <button className="icon-button" onClick={() => moveWeek(1)} aria-label="Next week"><ChevronRight size={19} /></button>
         </div>
-        <div className="toolbar">
-          <button className="icon-button" onClick={() => moveWeek(-1)} aria-label="Previous week"><ChevronLeft /></button>
-          <button className="secondary-button" onClick={() => setWeekOffset(0)}>Today</button>
-          <button className="icon-button" onClick={() => moveWeek(1)} aria-label="Next week"><ChevronRight /></button>
+        <div className="pulse-toolbar-actions">
+          <button className="pulse-today-button" onClick={() => setWeekOffset(0)}>Today</button>
+          <div className="pulse-view-switch"><button className={dayCount === 7 ? "active" : ""} onClick={() => setDayCount(7)}>Week</button><button className={dayCount === 5 ? "active" : ""} onClick={() => setDayCount(5)}>5 days</button></div>
+          <button className="pulse-free-button" onClick={() => openAvailability()}><Clock size={16} /> Log free time</button>
+          <button className="pulse-new-session" onClick={openSessionComposer}><Plus size={17} /> New session</button>
         </div>
       </header>
-      <div className="content-layout">
-        <div className="main-stack">
+      <div className="pulse-calendar-layout">
+        <div className="pulse-calendar-main">
           <div className={`week-transition week-transition-${transitionDirection}`} key={weekOffset}>
             <CalendarGrid
               user={user}
-              days={days}
+              days={visibleDays}
               availability={data.availability}
               events={data.events}
               bestSlots={bestSlots}
-              onAvailabilityDraft={setAvailabilityDraft}
+              onAvailabilityDraft={openAvailability}
               onReschedule={rescheduleEvent}
             />
           </div>
-          <AvailabilityForm
-            selectedDate={localDate(days[0])}
-            onCreated={refresh}
-            compact
-            draft={availabilityDraft}
-            onManage={onManageAvailability}
-          />
-          <EventForm games={data.games} friends={data.friends} selectedDate={localDate(days[0])} onSearchGames={searchGames} onCreated={refresh} />
         </div>
-        <div className="side-stack">
-          <BestTimePanel slots={bestSlots} onUse={(slot) => setAvailabilityDraft({ date: slot.date, startTime: slot.startTime, endTime: slot.endTime })} />
-          <GameRail games={data.games} onSearchGames={searchGames} />
-          <EventList user={user} events={data.events} refresh={refresh} />
-        </div>
+        <CalendarUtilityRail availability={data.availability} events={data.events} onOpenEvents={onOpenEvents} onManageAvailability={onManageAvailability} />
       </div>
-    </>
-  );
-}
-
-function GameRail({ games, onSearchGames }) {
-  const [query, setQuery] = useState("co-op");
-  useDebouncedSteamSearch(query, onSearchGames);
-
-  return (
-    <aside className="right-rail">
-      <section>
-        <h3>Steam games</h3>
-        <form className="suggest-form" onSubmit={(event) => { event.preventDefault(); onSearchGames(query); }}>
-          <input placeholder="Search Steam" value={query} onChange={(event) => setQuery(event.target.value)} />
-          <button aria-label="Search Steam"><Search size={17} /></button>
-        </form>
-        <div className="game-list">
-          {games.slice(0, 6).map((game) => (
-            <article key={game.appId}>
-              <SteamImage src={game.image} />
-              <div>
-                <strong>{game.title}</strong>
-                <span>{game.price || "Steam app"} - #{game.appId}</span>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-    </aside>
+      <div className="pulse-dock-stack">
+        {availabilityOpen ? <AvailabilityForm selectedDate={localDate(days[0])} onCreated={() => { refresh(); setAvailabilityOpen(false); setAvailabilityDraft(null); }} compact draft={availabilityDraft} onManage={onManageAvailability} /> : null}
+        <EventForm games={data.games} friends={data.friends} selectedDate={localDate(days[0])} onSearchGames={searchGames} onCreated={refresh} expanded={sessionComposerOpen} onToggle={setSessionComposerOpen} />
+      </div>
+    </section>
   );
 }
 
@@ -2330,6 +2370,7 @@ function App() {
             refresh={refresh}
             searchGames={searchGames}
             onManageAvailability={() => setActiveView("free-time")}
+            onOpenEvents={() => setActiveView("events")}
           />
         )}
         {activeView === "tonight" && <TonightView dashboard={visibleDashboard} setActiveView={setActiveView} />}
