@@ -14,14 +14,18 @@ SquadSlot is a self-hosted gaming calendar for friend groups. Share free time, f
 - One-off or recurring availability with multi-day drag selection
 - Best-time finder that ranks the strongest player overlap
 - Event invitations shown in Events until accepted, declined, removed, or completed
+- Multiple squads with isolated members, calendars, events, and game suggestions
+- Pre-event proposals with time and game voting plus random tie resolution
+- Scheduling conflict warnings, capacity waitlists, and automatic promotion
+- Event history for reviewing completed sessions
 - Minimum and maximum player capacity with ready-state notifications
 - Multiple game options, invitee voting, and random tie resolution
 - Steam search-as-you-type with game artwork and details
 - Event comments for servers, mods, DLC, and plan changes
 - Private live calendar subscriptions for Apple Calendar, Google Calendar, and Outlook
-- Discord webhook updates, reminders, editable templates, and test delivery
+- Discord updates, reminders, editable templates, test delivery, and bot RSVP buttons
 - User profiles, colours, timezones, preferred hours, themes, and avatars
-- Admin account management, temporary password resets, and JSON backup/restore
+- Admin account management, audit history, temporary password resets, and encrypted scheduled backups
 - Installable PWA for desktop and mobile home screens
 
 ![SquadSlot shared calendar](docs/screenshots/calendar.png)
@@ -156,7 +160,7 @@ The subscription URL is a bearer credential. Anyone with the URL can read that u
 
 ## Discord Integration
 
-SquadSlot uses a Discord webhook, so no bot token or gateway process is required.
+SquadSlot supports simple one-way webhooks and an optional Discord application for RSVP buttons. A gateway process is not required.
 
 Create a webhook from the target Discord channel under **Edit Channel > Integrations**, then configure it from the Admin page or `.env`:
 
@@ -179,6 +183,14 @@ Available notifications include:
 
 Administrators can enable or disable each notification, edit title and message templates, set reminder timing, and send a test webhook.
 
+For Accept, Tentative, and Decline buttons, create a Discord application and bot, add it to the server with permission to view the target channel and send messages, then enter the application ID, public key, bot token, and channel ID under **Admin > Discord**. Set the application's Interactions Endpoint URL to the URL shown there, for example:
+
+```text
+https://calendar.example.com/discord/interactions
+```
+
+Each player must also enter their numeric Discord user ID in **Profile**. Incoming interactions are verified with Discord's Ed25519 signature before an RSVP is changed.
+
 ## Administration And Backups
 
 Administrators can:
@@ -189,6 +201,7 @@ Administrators can:
 - Configure and test Discord
 - Manage notification templates and reminder settings
 - Export and restore a complete JSON backup
+- Run encrypted on-disk backups and review administrative audit records
 
 Backups include:
 
@@ -199,7 +212,18 @@ Backups include:
 - Live calendar subscription token hashes
 - Discord settings, notification rules, and reminder history
 
-Backups do not contain plaintext passwords. They can contain a Discord webhook URL and authentication hashes, so store them privately.
+Backups also include squads, proposals, UTC event timestamps, Discord identities, and audit records. They do not contain plaintext account passwords, but they can contain a Discord webhook URL and authentication hashes, so store them privately.
+
+To enable encrypted automatic backups in `/data/backups`, set:
+
+```env
+AUTO_BACKUP_ENABLED=true
+BACKUP_ENCRYPTION_KEY=replace-with-a-long-separate-backup-secret
+BACKUP_INTERVAL_HOURS=24
+BACKUP_RETENTION=14
+```
+
+Keep `BACKUP_ENCRYPTION_KEY` outside the backup volume. The same key is required to restore encrypted files.
 
 ## Updating
 
@@ -290,6 +314,14 @@ SESSION_SECRET=replace-with-a-long-random-secret-at-least-32-characters npm star
 | `TRUST_PROXY` | `0` | Set to `1` behind a trusted reverse proxy |
 | `DISCORD_WEBHOOK_URL` | empty | Optional Discord webhook |
 | `DISCORD_BOT_NAME` | `SquadSlot` | Discord webhook display name |
+| `DISCORD_APPLICATION_ID` | empty | Discord application ID for interactive RSVP buttons |
+| `DISCORD_PUBLIC_KEY` | empty | Discord application Ed25519 public key |
+| `DISCORD_BOT_TOKEN` | empty | Bot token used to post interactive messages |
+| `DISCORD_CHANNEL_ID` | empty | Channel receiving interactive bot messages |
+| `AUTO_BACKUP_ENABLED` | `false` | Run encrypted backups on a schedule |
+| `BACKUP_ENCRYPTION_KEY` | empty | Secret used for AES-256-GCM backup encryption; minimum 16 characters |
+| `BACKUP_INTERVAL_HOURS` | `24` | Hours between automatic backups |
+| `BACKUP_RETENTION` | `14` | Number of encrypted backups retained |
 | `SQUADSLOT_CLEAN_DEMO_DATA` | `false` | Development-only cleanup for legacy seeded demo users |
 
 ## Security
@@ -300,6 +332,8 @@ SESSION_SECRET=replace-with-a-long-random-secret-at-least-32-characters npm star
 - State-changing API requests enforce JSON content type and same-origin checks.
 - Authentication endpoints have in-memory rate limiting.
 - Discord webhook URLs are restricted to Discord webhook hosts.
+- Discord interactions require a valid Ed25519 request signature.
+- Squad-scoped records are checked against the active membership on every API operation.
 - Subscription tokens are random bearer credentials stored as SHA-256 hashes.
 - Common CSP, frame, referrer, permissions, and content-sniffing headers are enabled.
 - The Docker runtime runs as the unprivileged `node` user.

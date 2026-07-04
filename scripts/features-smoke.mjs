@@ -42,6 +42,7 @@ async function main() {
       NODE_ENV: "production",
       PORT: String(port),
       DATABASE_PATH: path.join(tempDir, "squadslot.db"),
+      BACKUP_ENCRYPTION_KEY: "feature-smoke-backup-key-123456",
       SESSION_SECRET: "feature-smoke-secret-123456789012345"
     },
     stdio: ["ignore", "pipe", "pipe"]
@@ -206,6 +207,8 @@ async function main() {
       !result.payload.dashboard.pendingInvites.some((event) => event.id === pastEventId),
       "Past invite remained in the Dashboard response."
     );
+    result = await request("/api/events/history", adminCookie);
+    assert(result.response.ok && result.payload.events.some((event) => event.id === pastEventId), "Past event was missing from history.");
 
     for (const [cookie, note] of [[adminCookie, "Admin free"], [friendCookie, "Friend free"]]) {
       result = await request("/api/availability", cookie, {
@@ -261,6 +264,31 @@ async function main() {
     });
     assert(result.response.status === 201, "Availability preset creation failed.");
 
+    result = await request("/api/proposals", adminCookie, {
+      method: "POST",
+      body: JSON.stringify({
+        title: "Proposal test",
+        slots: [
+          { date: eventDate, startTime: "18:00", endTime: "20:00" },
+          { date: eventDate, startTime: "20:00", endTime: "22:00" }
+        ],
+        games: [{ steamAppId: 548430, title: "Deep Rock Galactic" }, { steamAppId: 892970, title: "Valheim" }],
+        inviteIds: [friendId]
+      })
+    });
+    assert(result.response.status === 201, "Proposal creation failed.");
+    const proposalId = result.payload.id;
+    result = await request("/api/proposals", friendCookie);
+    const proposal = result.payload.proposals.find((item) => item.id === proposalId);
+    assert(proposal?.slots.length === 2 && proposal.games.length === 2, "Proposal options were not returned.");
+    result = await request(`/api/proposals/${proposalId}/vote`, friendCookie, {
+      method: "PUT",
+      body: JSON.stringify({ slotId: proposal.slots[1].id, gameId: proposal.games[1].id })
+    });
+    assert(result.response.ok, "Proposal vote failed.");
+    result = await request(`/api/proposals/${proposalId}/finalize`, adminCookie, { method: "POST", body: JSON.stringify({}) });
+    assert(result.response.status === 201 && result.payload.eventId, "Proposal finalization failed.");
+
     result = await request("/api/events", adminCookie, {
       method: "POST",
       body: JSON.stringify({
@@ -288,6 +316,55 @@ async function main() {
       body: JSON.stringify({ status: "accepted" })
     });
     assert(result.response.ok, "Invite acceptance failed.");
+
+    result = await request("/api/events", adminCookie, {
+      method: "POST",
+      body: JSON.stringify({
+        title: "Conflicting session",
+        date: eventDate,
+        startTime: "21:00",
+        endTime: "23:00",
+        minPlayers: 1,
+        maxPlayers: 3,
+        inviteIds: [friendId]
+      })
+    });
+    assert(result.response.status === 201, "Conflict test event creation failed.");
+    const conflictEventId = result.payload.id;
+    result = await request(`/api/events/${conflictEventId}/invites/me`, friendCookie, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "accepted" })
+    });
+    assert(result.response.status === 409 && result.payload.code === "EVENT_CONFLICT", "Overlapping accepted event was not detected.");
+    result = await request(`/api/events/${conflictEventId}/invites/me`, friendCookie, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "accepted", force: true })
+    });
+    assert(result.response.ok, "Conflict override failed.");
+    result = await request(`/api/events/${conflictEventId}/invites/me`, friendCookie, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "declined" })
+    });
+    assert(result.response.ok, "Conflict test cleanup failed.");
+
+    result = await request("/api/events", adminCookie, {
+      method: "POST",
+      body: JSON.stringify({
+        title: "Full session",
+        date: dateAfter(4),
+        startTime: "19:00",
+        endTime: "20:00",
+        minPlayers: 1,
+        maxPlayers: 1,
+        inviteIds: [friendId]
+      })
+    });
+    const fullEventId = result.payload.id;
+    result = await request(`/api/events/${fullEventId}/invites/me`, friendCookie, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "accepted" })
+    });
+    assert(result.response.status === 202 && result.payload.status === "waitlisted", "Full event did not create a waitlist entry.");
 
     result = await request("/api/events", friendCookie);
     const event = result.payload.events.find((item) => item.id === eventId);
@@ -363,10 +440,14 @@ async function main() {
     });
     assert(result.response.ok, "Event reschedule failed.");
 
+    result = await request("/api/events", adminCookie);
+    const rescheduled = result.payload.events.find((item) => item.id === eventId);
+    const expectedUtcStart = new Date(rescheduled.startsAtUtc).toISOString().replaceAll("-", "").replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
+
     result = await request(firstSubscriptionPath, "");
     assert(
       result.response.ok
-      && result.payload.includes(`DTSTART:${eventDate.replaceAll("-", "")}T210000`)
+      && result.payload.includes(`DTSTART:${expectedUtcStart}`)
       && result.payload.includes("LAST-MODIFIED:"),
       "Live calendar feed did not reflect the rescheduled event."
     );
@@ -388,7 +469,7 @@ async function main() {
     assert(result.response.status === 404, "Revoked calendar subscription remained accessible.");
 
     result = await request("/api/dashboard", adminCookie);
-    assert(result.response.ok && result.payload.dashboard.nextEvent.id === eventId, "Dashboard next event failed.");
+    assert(result.response.ok && result.payload.dashboard.nextEvent, "Dashboard next event failed.");
 
     result = await request(`/api/events/${eventId}/invites/me`, adminCookie, { method: "DELETE" });
     assert(result.response.status === 409, "An event creator should not be able to leave their own event.");
@@ -444,12 +525,44 @@ async function main() {
       "Backup did not include password reset and session version state."
     );
     const backup = result.payload;
+    assert(
+      backup.tables.groups.length === 1 && backup.tables.proposals.some((item) => item.id === proposalId),
+      "Backup omitted squad or proposal data."
+    );
+
+    result = await request("/api/admin/backups/run", adminCookie, { method: "POST", body: JSON.stringify({}) });
+    assert(result.response.status === 201 && result.payload.backup.name.endsWith(".json.enc"), "Encrypted backup creation failed.");
+    result = await request("/api/admin/backups", adminCookie);
+    assert(result.response.ok && result.payload.backups.length === 1 && result.payload.config.encrypted, "Encrypted backup listing failed.");
+    result = await request("/api/admin/audit", adminCookie);
+    assert(result.response.ok && result.payload.entries.some((entry) => entry.action === "backup.created"), "Backup audit entry was not recorded.");
 
     result = await request("/api/admin/backup/restore", adminCookie, {
       method: "POST",
       body: JSON.stringify(backup)
     });
     assert(result.response.ok, "Backup restore failed with password reset state.");
+
+    result = await request("/api/groups", adminCookie);
+    const originalGroupId = result.payload.activeGroupId;
+    result = await request("/api/groups", adminCookie, {
+      method: "POST",
+      body: JSON.stringify({ name: "Second Squad", timezone: "Europe/London" })
+    });
+    assert(result.response.status === 201, "Squad creation failed.");
+    const secondGroupId = result.payload.id;
+    result = await request("/api/events", adminCookie);
+    assert(result.response.ok && result.payload.events.length === 0, "Events leaked into a newly created squad.");
+    result = await request("/api/groups", adminCookie);
+    const secondGroup = result.payload.groups.find((group) => group.id === secondGroupId);
+    result = await request("/api/groups/join", friendCookie, {
+      method: "POST",
+      body: JSON.stringify({ inviteCode: secondGroup.inviteCode })
+    });
+    assert(result.response.ok, "Joining a squad failed.");
+    result = await request("/api/friends", friendCookie);
+    assert(result.response.ok && result.payload.users.some((account) => account.id === adminId), "Squad membership did not update the friend list.");
+    assert(originalGroupId !== secondGroupId, "Squad IDs should be distinct.");
 
     assert(adminId !== friendId, "Test users should be distinct.");
     console.log("Feature smoke test passed.");

@@ -2,6 +2,34 @@
 
 Significant SquadSlot changes are recorded here by release date.
 
+## 2026-07-04 - Squads, Proposals, And Safer Scheduling
+
+### New Features
+
+- Added multiple squads with isolated calendars, friends, availability, events, and game suggestions.
+- Added proposal voting for several possible times and games, with random tie-breaking when finalized.
+- Added event history for completed sessions.
+- Added conflict warnings with an explicit override and capacity waitlists with automatic promotion.
+- Added optional Discord bot RSVP buttons linked through each profile's Discord user ID.
+- Added encrypted scheduled backups, retention controls, downloadable backup history, and file restore APIs.
+- Added an administrator audit log for account, event, proposal, group, settings, RSVP, and backup actions.
+
+### Improvements
+
+- Event times are now normalized to UTC and displayed in each account's configured timezone.
+- Squad owners can rotate invite codes, while users can create, join, and switch squads.
+- JSON backup and restore now include squads, proposals, Discord identities, UTC timestamps, and audit history.
+- Full events now place additional accepted players on a visible waitlist instead of rejecting the response.
+- Discord messages use a configured bot channel when available and fall back to the existing webhook setup.
+
+### Security And Reliability
+
+- Record lookups now enforce active-squad boundaries to prevent cross-squad ID access.
+- Event invitees are validated against active squad membership.
+- Discord interactions are verified with the application's Ed25519 public key.
+- Automatic backup files use AES-256-GCM and atomic writes before retention cleanup.
+- Expanded smoke coverage for group isolation, proposals, conflicts, waitlists, history, backups, and audit records.
+
 ## 2026-06-28 - Account Recovery And Responsive Layouts
 
 ### New Features

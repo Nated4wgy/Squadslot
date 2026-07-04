@@ -1,6 +1,8 @@
 import Database from "better-sqlite3";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { DateTime } from "luxon";
 
 const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), "data", "squadslot.db");
 
@@ -22,6 +24,15 @@ db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    invite_code TEXT NOT NULL UNIQUE,
+    timezone TEXT NOT NULL DEFAULT 'Europe/London',
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -77,6 +88,14 @@ db.exec(`
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     status TEXT NOT NULL DEFAULT 'invited',
     PRIMARY KEY (event_id, user_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS group_members (
+    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL DEFAULT 'member',
+    joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (group_id, user_id)
   );
 
   CREATE TABLE IF NOT EXISTS app_settings (
@@ -151,7 +170,68 @@ db.exec(`
     reminder_key TEXT PRIMARY KEY,
     sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS event_proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    notes TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finalized_event_id INTEGER REFERENCES events(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS proposal_slots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposal_id INTEGER NOT NULL REFERENCES event_proposals(id) ON DELETE CASCADE,
+    starts_at_utc TEXT NOT NULL,
+    ends_at_utc TEXT NOT NULL,
+    timezone TEXT NOT NULL,
+    label TEXT DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS proposal_games (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposal_id INTEGER NOT NULL REFERENCES event_proposals(id) ON DELETE CASCADE,
+    steam_app_id INTEGER,
+    title TEXT NOT NULL,
+    image_url TEXT DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS proposal_invites (
+    proposal_id INTEGER NOT NULL REFERENCES event_proposals(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (proposal_id, user_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS proposal_votes (
+    proposal_id INTEGER NOT NULL REFERENCES event_proposals(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    slot_id INTEGER REFERENCES proposal_slots(id) ON DELETE CASCADE,
+    game_id INTEGER REFERENCES proposal_games(id) ON DELETE CASCADE,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (proposal_id, user_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
+    actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    action TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id TEXT,
+    details TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
 `);
+
+const defaultGroup = db.prepare("SELECT id FROM groups ORDER BY id LIMIT 1").get();
+if (!defaultGroup) {
+  db.prepare("INSERT INTO groups (name, invite_code, timezone) VALUES (?, ?, ?)")
+    .run("Main Squad", crypto.randomBytes(12).toString("base64url"), process.env.TZ || "Europe/London");
+}
+const defaultGroupId = db.prepare("SELECT id FROM groups ORDER BY id LIMIT 1").get().id;
 
 const userColumns = db.prepare("PRAGMA table_info(users)").all().map((column) => column.name);
 if (!userColumns.includes("role")) {
@@ -190,6 +270,12 @@ if (!userColumns.includes("must_change_password")) {
 if (!userColumns.includes("session_version")) {
   db.exec("ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0");
 }
+if (!userColumns.includes("active_group_id")) {
+  db.exec("ALTER TABLE users ADD COLUMN active_group_id INTEGER");
+}
+if (!userColumns.includes("discord_user_id")) {
+  db.exec("ALTER TABLE users ADD COLUMN discord_user_id TEXT NOT NULL DEFAULT ''");
+}
 
 const eventColumns = db.prepare("PRAGMA table_info(events)").all().map((column) => column.name);
 if (!eventColumns.includes("steam_app_id")) {
@@ -217,6 +303,65 @@ if (!eventColumns.includes("updated_at")) {
   db.exec("ALTER TABLE events ADD COLUMN updated_at TEXT");
   db.exec("UPDATE events SET updated_at = created_at WHERE updated_at IS NULL");
 }
+if (!eventColumns.includes("group_id")) {
+  db.exec("ALTER TABLE events ADD COLUMN group_id INTEGER");
+}
+if (!eventColumns.includes("timezone")) {
+  db.exec("ALTER TABLE events ADD COLUMN timezone TEXT");
+}
+if (!eventColumns.includes("starts_at_utc")) {
+  db.exec("ALTER TABLE events ADD COLUMN starts_at_utc TEXT");
+}
+if (!eventColumns.includes("ends_at_utc")) {
+  db.exec("ALTER TABLE events ADD COLUMN ends_at_utc TEXT");
+}
+
+for (const table of ["availability", "availability_rules", "availability_presets", "game_suggestions"]) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name);
+  if (!columns.includes("group_id")) db.exec(`ALTER TABLE ${table} ADD COLUMN group_id INTEGER`);
+}
+
+for (const table of ["availability", "availability_rules"]) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name);
+  if (!columns.includes("timezone")) db.exec(`ALTER TABLE ${table} ADD COLUMN timezone TEXT`);
+}
+
+db.transaction(() => {
+  db.prepare("UPDATE users SET active_group_id = ? WHERE active_group_id IS NULL").run(defaultGroupId);
+  db.prepare(`
+    INSERT OR IGNORE INTO group_members (group_id, user_id, role)
+    SELECT ?, id, CASE WHEN role = 'admin' THEN 'owner' ELSE 'member' END FROM users
+  `).run(defaultGroupId);
+  for (const table of ["events", "availability", "availability_rules", "availability_presets", "game_suggestions"]) {
+    db.prepare(`UPDATE ${table} SET group_id = ? WHERE group_id IS NULL`).run(defaultGroupId);
+  }
+  db.prepare(`
+    UPDATE availability
+    SET timezone = COALESCE((SELECT timezone FROM users WHERE users.id = availability.user_id), ?)
+    WHERE timezone IS NULL OR timezone = ''
+  `).run(process.env.TZ || "Europe/London");
+  db.prepare(`
+    UPDATE availability_rules
+    SET timezone = COALESCE((SELECT timezone FROM users WHERE users.id = availability_rules.user_id), ?)
+    WHERE timezone IS NULL OR timezone = ''
+  `).run(process.env.TZ || "Europe/London");
+})();
+
+const fallbackZone = process.env.TZ || "Europe/London";
+const eventsMissingUtc = db.prepare(`
+  SELECT e.id, e.date, e.start_time AS startTime, e.end_time AS endTime,
+         COALESCE(NULLIF(e.timezone, ''), u.timezone, ?) AS timezone
+  FROM events e
+  JOIN users u ON u.id = e.owner_id
+  WHERE e.starts_at_utc IS NULL OR e.ends_at_utc IS NULL OR e.timezone IS NULL OR e.timezone = ''
+`).all(fallbackZone);
+const updateEventUtc = db.prepare("UPDATE events SET timezone = ?, starts_at_utc = ?, ends_at_utc = ? WHERE id = ?");
+for (const event of eventsMissingUtc) {
+  const zone = DateTime.local().setZone(event.timezone).isValid ? event.timezone : fallbackZone;
+  const start = DateTime.fromISO(`${event.date}T${event.startTime}`, { zone });
+  const end = DateTime.fromISO(`${event.date}T${event.endTime}`, { zone });
+  updateEventUtc.run(zone, start.toUTC().toISO(), end.toUTC().toISO(), event.id);
+}
 
 db.exec(`
   UPDATE event_invites
@@ -227,6 +372,13 @@ db.exec(`
       WHERE events.id = event_invites.event_id
         AND events.owner_id = event_invites.user_id
     );
+
+  CREATE INDEX IF NOT EXISTS idx_events_group_utc ON events(group_id, starts_at_utc, ends_at_utc);
+  CREATE INDEX IF NOT EXISTS idx_availability_group_date ON availability(group_id, date);
+  CREATE INDEX IF NOT EXISTS idx_rules_group_dates ON availability_rules(group_id, start_date, end_date);
+  CREATE INDEX IF NOT EXISTS idx_suggestions_group_created ON game_suggestions(group_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_invites_user_status ON event_invites(user_id, status);
+  CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
 `);
 
 export function cleanupDemoOnlyDatabase() {
@@ -277,6 +429,8 @@ export function publicUser(user, includeAuthState = false) {
     theme: user.theme || "dark",
     accent: user.accent || "#2fd3ba",
     discordUsername: user.discord_username || "",
+    discordUserId: user.discord_user_id || "",
+    activeGroupId: user.active_group_id || defaultGroupId,
     createdAt: user.created_at
   };
   if (includeAuthState) result.mustChangePassword = Boolean(user.must_change_password);

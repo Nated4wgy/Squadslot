@@ -20,7 +20,9 @@ export function addDateDays(value, amount) {
   return dateString(date);
 }
 
-export function expandAvailability(startDate, endDate) {
+export function expandAvailability(startDate, endDate, groupId = null) {
+  const groupClause = groupId ? " AND a.group_id = ?" : "";
+  const explicitParams = groupId ? [startDate, endDate, groupId] : [startDate, endDate];
   const explicit = db
     .prepare(`
       SELECT a.id, a.user_id AS userId, u.display_name AS displayName, u.avatar_url AS avatarUrl,
@@ -28,10 +30,12 @@ export function expandAvailability(startDate, endDate) {
              a.end_time AS endTime, a.note, a.created_at AS createdAt, 0 AS recurring
       FROM availability a
       JOIN users u ON u.id = a.user_id
-      WHERE a.date BETWEEN ? AND ?
+      WHERE a.date BETWEEN ? AND ?${groupClause}
     `)
-    .all(startDate, endDate);
+    .all(...explicitParams);
 
+  const ruleGroupClause = groupId ? " AND r.group_id = ?" : "";
+  const ruleParams = groupId ? [endDate, startDate, groupId] : [endDate, startDate];
   const rules = db
     .prepare(`
       SELECT r.id AS ruleId, r.user_id AS userId, u.display_name AS displayName,
@@ -40,9 +44,9 @@ export function expandAvailability(startDate, endDate) {
              r.start_date AS startDate, r.end_date AS endDate, r.created_at AS createdAt
       FROM availability_rules r
       JOIN users u ON u.id = r.user_id
-      WHERE r.start_date <= ? AND (r.end_date IS NULL OR r.end_date = '' OR r.end_date >= ?)
+      WHERE r.start_date <= ? AND (r.end_date IS NULL OR r.end_date = '' OR r.end_date >= ?)${ruleGroupClause}
     `)
-    .all(endDate, startDate);
+    .all(...ruleParams);
   const exceptions = new Set(
     db.prepare("SELECT rule_id AS ruleId, date FROM availability_exceptions WHERE date BETWEEN ? AND ?")
       .all(startDate, endDate)
@@ -77,15 +81,18 @@ export function expandAvailability(startDate, endDate) {
   ));
 }
 
-export function findBestSlots(startDate, endDate, availability = expandAvailability(startDate, endDate)) {
+export function findBestSlots(startDate, endDate, availability = null, groupId = null) {
+  const expanded = availability || expandAvailability(startDate, endDate, groupId);
+  const eventGroupClause = groupId ? " AND e.group_id = ?" : "";
+  const eventParams = groupId ? [startDate, endDate, groupId] : [startDate, endDate];
   const events = db
     .prepare(`
       SELECT e.date, e.start_time AS startTime, e.end_time AS endTime, ei.user_id AS userId
       FROM events e
       JOIN event_invites ei ON ei.event_id = e.id
-      WHERE e.date BETWEEN ? AND ? AND ei.status IN ('accepted', 'tentative')
+      WHERE e.date BETWEEN ? AND ? AND ei.status IN ('accepted', 'tentative')${eventGroupClause}
     `)
-    .all(startDate, endDate);
+    .all(...eventParams);
   const slots = [];
 
   for (let cursor = startDate; cursor <= endDate; cursor = addDateDays(cursor, 1)) {
@@ -96,7 +103,7 @@ export function findBestSlots(startDate, endDate, availability = expandAvailabil
           .map((event) => event.userId)
       );
       const players = new Map();
-      for (const item of availability) {
+      for (const item of expanded) {
         if (item.date !== cursor || item.startTime > startTime || item.endTime <= startTime || committed.has(item.userId)) continue;
         players.set(item.userId, {
           id: item.userId,
@@ -140,6 +147,10 @@ function icsTimestamp(value) {
   return date.toISOString().replaceAll("-", "").replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
 }
 
+function eventIcsDateTime(event, utcKey, localTime) {
+  return event[utcKey] ? icsTimestamp(event[utcKey]) : icsDateTime(event.date, localTime);
+}
+
 function availabilityUid(item) {
   return String(item.uid || item.id || `${item.date}-${item.startTime}-${item.endTime}`)
     .replace(/[^A-Za-z0-9_.-]/g, "-");
@@ -165,8 +176,8 @@ export function eventsToIcs(events, calendarName = "SquadSlot", options = {}) {
       `UID:squadslot-${event.id}@squadslot`,
       `DTSTAMP:${icsTimestamp(event.createdAt)}`,
       `LAST-MODIFIED:${icsTimestamp(modifiedAt)}`,
-      `DTSTART:${icsDateTime(event.date, event.startTime)}`,
-      `DTEND:${icsDateTime(event.date, event.endTime)}`,
+      `DTSTART:${eventIcsDateTime(event, "startsAtUtc", event.startTime)}`,
+      `DTEND:${eventIcsDateTime(event, "endsAtUtc", event.endTime)}`,
       `SUMMARY:${icsEscape(event.title)}`,
       `DESCRIPTION:${icsEscape([event.gameTitle, event.notes].filter(Boolean).join(" - "))}`,
       `STATUS:${event.calendarStatus === "tentative" ? "TENTATIVE" : "CONFIRMED"}`,
@@ -236,7 +247,7 @@ export async function runReminderSweep(sendNotification, now = new Date()) {
     .prepare(`
       SELECT e.id, e.title, e.date, e.start_time AS startTime, e.end_time AS endTime,
              e.rsvp_deadline AS rsvpDeadline, COALESCE(e.game_title, g.title) AS gameTitle,
-             owner.display_name AS ownerName
+             e.starts_at_utc AS startsAtUtc, owner.display_name AS ownerName
       FROM events e
       JOIN users owner ON owner.id = e.owner_id
       LEFT JOIN games g ON g.id = e.game_id
@@ -251,7 +262,7 @@ export async function runReminderSweep(sendNotification, now = new Date()) {
   }
 
   for (const event of events) {
-    const startsAt = dateTimeFromStrings(event.date, event.startTime);
+    const startsAt = event.startsAtUtc ? new Date(event.startsAtUtc) : dateTimeFromStrings(event.date, event.startTime);
     const minutesUntil = (startsAt.getTime() - now.getTime()) / 60000;
     const variables = {
       title: event.title,

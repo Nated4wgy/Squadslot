@@ -139,7 +139,11 @@ async function api(path, options = {}) {
   if (response.status === 401 && !path.startsWith("/api/auth/")) {
     window.dispatchEvent(new window.Event("squadslot:session-expired"));
   }
-  if (!response.ok) throw new Error(payload.error || "Something went wrong.");
+  if (!response.ok) {
+    const error = new Error(payload.error || "Something went wrong.");
+    Object.assign(error, payload);
+    throw error;
+  }
   return payload;
 }
 
@@ -254,7 +258,9 @@ function Sidebar({ user, activeView, setActiveView, onLogout }) {
     ["calendar", "Calendar", CalendarDays],
     ["tonight", "Tonight", Zap],
     ["events", "Events", Clock],
+    ["proposals", "Proposals", Vote],
     ["free-time", "Free Time", Check],
+    ["groups", "Squads", UsersRound],
     ["friends", "Friends", UsersRound],
     ["games", "Games", Gamepad2],
     ["profile", "Profile", UserRound],
@@ -1190,6 +1196,7 @@ function EventDetails({ user, event, refresh, onDelete, onLeave }) {
   const [comments, setComments] = useState([]);
   const [comment, setComment] = useState("");
   const accepted = event.invites.filter((invite) => invite.status === "accepted");
+  const waitlisted = event.invites.filter((invite) => invite.status === "waitlisted");
   const myInvite = event.invites.find((invite) => invite.userId === user.id);
   const canManage = event.ownerId === user.id || user.role === "admin";
   const canLeave = event.ownerId !== user.id && Boolean(myInvite);
@@ -1232,12 +1239,14 @@ function EventDetails({ user, event, refresh, onDelete, onLeave }) {
             <strong>{event.title}</strong>
             <span>{event.gameTitle || "Vote pending"} - {formatDate(event.date)}, {event.startTime} to {event.endTime}</span>
             <small>Host: {event.ownerName}</small>
+            {myInvite?.status === "waitlisted" && <small className="status-waitlist">You are on the waitlist</small>}
           </div>
         </div>
         <div className="capacity-meter">
           <span>{accepted.length}/{event.maxPlayers} accepted</span>
           <div><i style={{ width: `${Math.min(100, (accepted.length / event.maxPlayers) * 100)}%` }} /></div>
           <small>{event.ready ? "Minimum reached" : `${Math.max(0, event.minPlayers - accepted.length)} more needed`}</small>
+          {waitlisted.length > 0 && <small>{waitlisted.length} waitlisted</small>}
         </div>
         <div className="event-card-actions">
           <button className="secondary-button" type="button" onClick={toggleExpanded}><MessageSquare size={16} /> {expanded ? "Close" : "Details"}</button>
@@ -1288,6 +1297,9 @@ function EventDetails({ user, event, refresh, onDelete, onLeave }) {
 }
 
 function EventsView({ user, events, refresh, onOpenSubscription }) {
+  const [tab, setTab] = useState("upcoming");
+  const [history, setHistory] = useState([]);
+  const [message, setMessage] = useState("");
   const pendingInvites = events
     .filter((event) => event.invites.some((invite) => invite.userId === user.id && invite.status === "invited"))
     .map((event) => ({
@@ -1298,7 +1310,7 @@ function EventsView({ user, events, refresh, onOpenSubscription }) {
   const managedEvents = events
     .filter((event) => {
       const mine = event.invites.find((invite) => invite.userId === user.id);
-      return event.ownerId === user.id || ["accepted", "tentative"].includes(mine?.status) || user.role === "admin";
+      return event.ownerId === user.id || ["accepted", "tentative", "waitlisted"].includes(mine?.status) || user.role === "admin";
     })
     .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
 
@@ -1313,8 +1325,31 @@ function EventsView({ user, events, refresh, onOpenSubscription }) {
   }
 
   async function setInviteStatus(eventId, status) {
-    await api(`/api/events/${eventId}/invites/me`, { method: "PATCH", body: JSON.stringify({ status }) });
-    refresh();
+    setMessage("");
+    try {
+      const payload = await api(`/api/events/${eventId}/invites/me`, { method: "PATCH", body: JSON.stringify({ status }) });
+      if (payload.status === "waitlisted") setMessage("That session is full, so you were added to its waitlist.");
+      refresh();
+    } catch (error) {
+      if (error.code === "EVENT_CONFLICT" && window.confirm(`${error.message} Accept it anyway?`)) {
+        await api(`/api/events/${eventId}/invites/me`, { method: "PATCH", body: JSON.stringify({ status, force: true }) });
+        refresh();
+      } else {
+        setMessage(error.message);
+      }
+    }
+  }
+
+  async function changeTab(nextTab) {
+    setTab(nextTab);
+    if (nextTab === "history") {
+      try {
+        const payload = await api("/api/events/history");
+        setHistory(payload.events);
+      } catch (error) {
+        setMessage(error.message);
+      }
+    }
   }
 
   return (
@@ -1329,7 +1364,12 @@ function EventsView({ user, events, refresh, onOpenSubscription }) {
           <a className="secondary-button" href="/api/calendar.ics"><Download size={16} /> Download .ics</a>
         </div>
       </header>
-      <section className="table-panel events-invite-panel">
+      <div className="segmented-control" aria-label="Event list">
+        <button className={tab === "upcoming" ? "active" : ""} onClick={() => changeTab("upcoming")}>Upcoming</button>
+        <button className={tab === "history" ? "active" : ""} onClick={() => changeTab("history")}>History</button>
+      </div>
+      {message && <p className="form-error">{message}</p>}
+      {tab === "upcoming" && <section className="table-panel events-invite-panel">
         <div className="panel-heading">
           <Bell size={18} />
           <div>
@@ -1340,12 +1380,180 @@ function EventsView({ user, events, refresh, onOpenSubscription }) {
         {pendingInvites.map((event) => (
           <EventInviteRow event={event} onStatus={setInviteStatus} onRemove={leaveEvent} key={event.id} />
         ))}
-      </section>
-      {managedEvents.length === 0 && <section className="table-panel"><p className="muted">No accepted or tentative events yet.</p></section>}
-      <div className="event-detail-list">
+      </section>}
+      {tab === "upcoming" && managedEvents.length === 0 && <section className="table-panel"><p className="muted">No accepted or tentative events yet.</p></section>}
+      {tab === "upcoming" && <div className="event-detail-list">
         {managedEvents.map((event) => (
           <EventDetails user={user} event={event} refresh={refresh} onDelete={removeEvent} onLeave={leaveEvent} key={event.id} />
         ))}
+      </div>}
+      {tab === "history" && <div className="event-detail-list">
+        {history.map((event) => (
+          <article className="event-detail-card archive-event" key={event.id}>
+            <div><strong>{event.title}</strong><span>{event.gameTitle || "Game not selected"}</span></div>
+            <div><strong>{formatDate(event.date)}</strong><span>{event.startTime} to {event.endTime}</span></div>
+            <span>{event.invites.filter((invite) => invite.status === "accepted").length} attended</span>
+          </article>
+        ))}
+        {history.length === 0 && <section className="table-panel"><p className="muted">No past events yet.</p></section>}
+      </div>}
+    </>
+  );
+}
+
+function GroupsView({ user, groups, onChanged }) {
+  const [createForm, setCreateForm] = useState({ name: "", timezone: user.timezone || "Europe/London" });
+  const [inviteCode, setInviteCode] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function createGroup(event) {
+    event.preventDefault();
+    await api("/api/groups", { method: "POST", body: JSON.stringify(createForm) });
+    setCreateForm({ ...createForm, name: "" });
+    setMessage("Squad created and activated.");
+    onChanged();
+  }
+
+  async function joinGroup(event) {
+    event.preventDefault();
+    await api("/api/groups/join", { method: "POST", body: JSON.stringify({ inviteCode }) });
+    setInviteCode("");
+    setMessage("Squad joined and activated.");
+    onChanged();
+  }
+
+  async function activate(id) {
+    await api(`/api/groups/${id}/activate`, { method: "PUT", body: JSON.stringify({}) });
+    onChanged();
+  }
+
+  async function rotate(id) {
+    await api(`/api/groups/${id}/invite-code`, { method: "POST", body: JSON.stringify({}) });
+    setMessage("Invite code rotated.");
+    onChanged();
+  }
+
+  return (
+    <>
+      <header className="topbar"><div><h1>Squads</h1><p>Keep calendars, friends, events, and suggestions separate for each group.</p></div></header>
+      <div className="group-layout">
+        <section className="table-panel">
+          <div className="panel-heading"><UsersRound size={18} /><div><h2>Your squads</h2><p>Switching squad refreshes every shared view.</p></div></div>
+          <div className="group-list">
+            {groups.map((group) => (
+              <article className={group.id === user.activeGroupId ? "active" : ""} key={group.id}>
+                <div><strong>{group.name}</strong><span>{group.memberCount} members - {group.timezone}</span><small>{group.role}</small></div>
+                <div className="settings-actions">
+                  {group.id !== user.activeGroupId && <button className="secondary-button" onClick={() => activate(group.id)}>Open</button>}
+                  {group.id === user.activeGroupId && (user.role === "admin" || ["owner", "admin"].includes(group.role)) && <button className="icon-button dark-icon-button" title="Rotate invite code" onClick={() => rotate(group.id)}><RefreshCw size={16} /></button>}
+                </div>
+                {group.id === user.activeGroupId && (user.role === "admin" || ["owner", "admin"].includes(group.role)) && <code>{group.inviteCode}</code>}
+              </article>
+            ))}
+          </div>
+        </section>
+        <div>
+          <form className="table-panel admin-form" onSubmit={createGroup}>
+            <h2>Create squad</h2>
+            <label>Name<input required value={createForm.name} onChange={(event) => setCreateForm({ ...createForm, name: event.target.value })} /></label>
+            <label>Scheduling timezone<input required value={createForm.timezone} onChange={(event) => setCreateForm({ ...createForm, timezone: event.target.value })} /></label>
+            <button className="primary-button"><Plus size={16} /> Create</button>
+          </form>
+          <form className="table-panel admin-form" onSubmit={joinGroup}>
+            <h2>Join squad</h2>
+            <label>Invite code<input required value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} /></label>
+            <button className="secondary-button"><Link size={16} /> Join</button>
+          </form>
+          {message && <p className="muted">{message}</p>}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ProposalsView({ user, friends }) {
+  const tomorrow = localDate(addDays(new Date(), 1));
+  const [proposals, setProposals] = useState([]);
+  const [form, setForm] = useState({
+    title: "",
+    notes: "",
+    slots: [{ date: tomorrow, startTime: "19:00", endTime: "22:00" }],
+    games: [{ title: "", steamAppId: "" }],
+    inviteIds: []
+  });
+  const [message, setMessage] = useState("");
+
+  const load = useCallback(() => api("/api/proposals").then((payload) => setProposals(payload.proposals)), []);
+  useEffect(() => { load().catch((error) => setMessage(error.message)); }, [load]);
+  const updateItem = (key, index, patch) => setForm((current) => ({
+    ...current,
+    [key]: current[key].map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item)
+  }));
+
+  async function createProposal(event) {
+    event.preventDefault();
+    await api("/api/proposals", { method: "POST", body: JSON.stringify(form) });
+    setForm({ ...form, title: "", notes: "" });
+    setMessage("Proposal created.");
+    load();
+  }
+
+  async function vote(id, patch) {
+    await api(`/api/proposals/${id}/vote`, { method: "PUT", body: JSON.stringify(patch) });
+    load();
+  }
+
+  async function finalize(id) {
+    await api(`/api/proposals/${id}/finalize`, { method: "POST", body: JSON.stringify({}) });
+    setMessage("Winning time and game turned into an event.");
+    load();
+  }
+
+  async function remove(id) {
+    await api(`/api/proposals/${id}`, { method: "DELETE" });
+    load();
+  }
+
+  return (
+    <>
+      <header className="topbar"><div><h1>Proposals</h1><p>Vote on the date and game before committing to an event.</p></div></header>
+      <div className="proposal-layout">
+        <form className="table-panel proposal-form" onSubmit={createProposal}>
+          <h2>New proposal</h2>
+          <label>Title<input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
+          <label>Notes<textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+          <h3>Time options</h3>
+          {form.slots.map((slot, index) => <div className="proposal-option-row" key={index}>
+            <input type="date" value={slot.date} onChange={(event) => updateItem("slots", index, { date: event.target.value })} />
+            <input type="time" value={slot.startTime} onChange={(event) => updateItem("slots", index, { startTime: event.target.value })} />
+            <input type="time" value={slot.endTime} onChange={(event) => updateItem("slots", index, { endTime: event.target.value })} />
+          </div>)}
+          <button className="text-button inline-text-button" type="button" onClick={() => setForm({ ...form, slots: [...form.slots, { date: tomorrow, startTime: "19:00", endTime: "22:00" }] })}><Plus size={15} /> Add time</button>
+          <h3>Game options</h3>
+          {form.games.map((game, index) => <div className="proposal-option-row" key={index}>
+            <input placeholder="Game title" value={game.title} onChange={(event) => updateItem("games", index, { title: event.target.value })} />
+            <input placeholder="Steam app ID" inputMode="numeric" value={game.steamAppId} onChange={(event) => updateItem("games", index, { steamAppId: event.target.value })} />
+          </div>)}
+          <button className="text-button inline-text-button" type="button" onClick={() => setForm({ ...form, games: [...form.games, { title: "", steamAppId: "" }] })}><Plus size={15} /> Add game</button>
+          <div className="invite-grid">{friends.map((friend) => <label key={friend.id}><input type="checkbox" checked={form.inviteIds.includes(friend.id)} onChange={() => setForm({ ...form, inviteIds: form.inviteIds.includes(friend.id) ? form.inviteIds.filter((id) => id !== friend.id) : [...form.inviteIds, friend.id] })} /> {friend.displayName}</label>)}</div>
+          <button className="primary-button"><Vote size={16} /> Create proposal</button>
+        </form>
+        <div className="proposal-list">
+          {proposals.map((proposal) => {
+            const myVote = proposal.votes.find((voteItem) => voteItem.userId === user.id) || {};
+            const canManage = proposal.ownerId === user.id || user.role === "admin";
+            return <article className="table-panel proposal-card" key={proposal.id}>
+              <div className="section-title compact-title"><div><h2>{proposal.title}</h2><p>By {proposal.ownerName} - {proposal.status}</p></div>{canManage && <button className="danger-button" onClick={() => remove(proposal.id)}><Trash2 size={15} /></button>}</div>
+              {proposal.notes && <p>{proposal.notes}</p>}
+              <h3>Times</h3>
+              <div className="proposal-votes">{proposal.slots.map((slot) => <button className={myVote.slotId === slot.id ? "selected" : ""} disabled={proposal.status !== "open"} onClick={() => vote(proposal.id, { slotId: slot.id })} key={slot.id}><span>{formatDate(slot.date)} {slot.startTime}-{slot.endTime}</span><strong>{slot.voters.length}</strong></button>)}</div>
+              {proposal.games.length > 0 && <><h3>Games</h3><div className="proposal-votes">{proposal.games.map((game) => <button className={myVote.gameId === game.id ? "selected" : ""} disabled={proposal.status !== "open"} onClick={() => vote(proposal.id, { gameId: game.id })} key={game.id}><span>{game.title}</span><strong>{game.voters.length}</strong></button>)}</div></>}
+              {canManage && proposal.status === "open" && <button className="primary-button" onClick={() => finalize(proposal.id)}><Check size={16} /> Finalize winner</button>}
+            </article>;
+          })}
+          {proposals.length === 0 && <section className="table-panel"><p className="muted">No proposals yet.</p></section>}
+          {message && <p className="muted">{message}</p>}
+        </div>
       </div>
     </>
   );
@@ -1586,6 +1794,7 @@ function ProfileView({ user, onSaved }) {
             <label>Display name<input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} /></label>
             <label>Discord username<input value={form.discordUsername} onChange={(event) => setForm({ ...form, discordUsername: event.target.value })} /></label>
           </div>
+          <label>Discord user ID<input inputMode="numeric" value={form.discordUserId || ""} onChange={(event) => setForm({ ...form, discordUserId: event.target.value })} /></label>
           <label>Avatar HTTPS URL<input value={form.avatarUrl} onChange={(event) => setForm({ ...form, avatarUrl: event.target.value })} /></label>
           <label>Favourite games<textarea value={form.favoriteGames} onChange={(event) => setForm({ ...form, favoriteGames: event.target.value })} /></label>
           <div className="two-col">
@@ -1653,7 +1862,9 @@ function ProfileView({ user, onSaved }) {
 
 function AdminView({ user }) {
   const [users, setUsers] = useState([]);
-  const [settings, setSettings] = useState({ appUrl: "", discordWebhookUrl: "", discordBotName: "SquadSlot" });
+  const [settings, setSettings] = useState({ appUrl: "", discordWebhookUrl: "", discordBotName: "SquadSlot", discordApplicationId: "", discordPublicKey: "", discordChannelId: "", discordBotToken: "" });
+  const [backups, setBackups] = useState({ backups: [], config: {} });
+  const [auditEntries, setAuditEntries] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [reminders, setReminders] = useState({
     eventTomorrow: true,
@@ -1670,16 +1881,20 @@ function AdminView({ user }) {
   const [accountMessage, setAccountMessage] = useState({ type: "", text: "" });
 
   async function load() {
-    const [usersPayload, settingsPayload, notificationsPayload, remindersPayload] = await Promise.all([
+    const [usersPayload, settingsPayload, notificationsPayload, remindersPayload, backupsPayload, auditPayload] = await Promise.all([
       api("/api/admin/users"),
       api("/api/admin/settings"),
       api("/api/admin/notifications"),
-      api("/api/admin/reminders")
+      api("/api/admin/reminders"),
+      api("/api/admin/backups"),
+      api("/api/admin/audit")
     ]);
     setUsers(usersPayload.users);
     setSettings(settingsPayload.settings);
     setNotifications(notificationsPayload.notifications);
     setReminders(remindersPayload.reminders);
+    setBackups(backupsPayload);
+    setAuditEntries(auditPayload.entries);
   }
 
   useEffect(() => {
@@ -1811,6 +2026,17 @@ function AdminView({ user }) {
     }
   }
 
+  async function runEncryptedBackup() {
+    setBackupMessage("");
+    try {
+      const payload = await api("/api/admin/backups/run", { method: "POST", body: JSON.stringify({}) });
+      setBackupMessage(`Encrypted backup created: ${payload.backup.name}`);
+      await load();
+    } catch (error) {
+      setBackupMessage(error.message);
+    }
+  }
+
   return (
     <>
       <header className="topbar">
@@ -1871,6 +2097,13 @@ function AdminView({ user }) {
             Bot name
             <input value={settings.discordBotName} onChange={(event) => setSettings({ ...settings, discordBotName: event.target.value })} />
           </label>
+          <div className="two-col">
+            <label>Application ID<input value={settings.discordApplicationId || ""} onChange={(event) => setSettings({ ...settings, discordApplicationId: event.target.value })} /></label>
+            <label>Channel ID<input value={settings.discordChannelId || ""} onChange={(event) => setSettings({ ...settings, discordChannelId: event.target.value })} /></label>
+          </div>
+          <label>Public key<input value={settings.discordPublicKey || ""} onChange={(event) => setSettings({ ...settings, discordPublicKey: event.target.value })} /></label>
+          <label>Bot token<input type="password" placeholder={settings.discordBotTokenConfigured ? "Configured - leave blank to keep" : "Discord bot token"} value={settings.discordBotToken || ""} onChange={(event) => setSettings({ ...settings, discordBotToken: event.target.value })} /></label>
+          <label>Interactions endpoint<input readOnly value={settings.discordInteractionUrl || ""} /></label>
           <div className="settings-actions">
             <button className="primary-button" type="submit"><Settings size={16} /> Save settings</button>
             <button className="secondary-button" type="button" onClick={testDiscord}><Send size={16} /> Send test</button>
@@ -1944,13 +2177,22 @@ function AdminView({ user }) {
         </form>
         <section className="table-panel admin-form">
           <h2>Backup and restore</h2>
-          <p className="muted">Exports include users, bcrypt password hashes, availability, events, invites, settings, and Discord webhook configuration.</p>
-          <button className="secondary-button" type="button" onClick={exportBackup}>Export backup</button>
+          <p className="muted">Complete exports include squads, accounts, password hashes, schedules, proposals, settings, and audit records.</p>
+          <div className="settings-actions">
+            <button className="secondary-button" type="button" onClick={exportBackup}>Export JSON</button>
+            <button className="primary-button" type="button" onClick={runEncryptedBackup}><Shield size={16} /> Run encrypted backup</button>
+          </div>
+          <p className="muted">Automatic: {backups.config.enabled ? `every ${backups.config.intervalHours} hours` : "off"} - retention {backups.config.retention || 0} - encryption {backups.config.encrypted ? "ready" : "needs BACKUP_ENCRYPTION_KEY"}</p>
+          <div className="backup-list">{backups.backups.slice(0, 8).map((backup) => <a href={`/api/admin/backups/${backup.name}`} key={backup.name}><Download size={15} /> <span>{backup.name}</span><small>{Math.ceil(backup.size / 1024)} KB</small></a>)}</div>
           <label>
             Restore backup JSON
             <input type="file" accept="application/json,.json" onChange={restoreBackup} />
           </label>
           {backupMessage && <p className="muted">{backupMessage}</p>}
+        </section>
+        <section className="table-panel admin-form audit-panel">
+          <h2>Audit log</h2>
+          <div className="audit-list">{auditEntries.map((entry) => <article key={entry.id}><div><strong>{entry.actorName}</strong><span>{entry.action}</span></div><small>{new Date(`${entry.createdAt}Z`).toLocaleString()} - {entry.targetType}{entry.targetId ? ` #${entry.targetId}` : ""}</small></article>)}</div>
         </section>
       </div>
     </>
@@ -1964,7 +2206,7 @@ function App() {
   const [dataLoading, setDataLoading] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
   const [clock, setClock] = useState(() => new Date());
-  const [data, setData] = useState({ availability: [], events: [], games: [], friends: [], dashboard: null });
+  const [data, setData] = useState({ availability: [], events: [], games: [], friends: [], groups: [], dashboard: null });
 
   const searchGames = useCallback(async (query = "co-op") => {
     try {
@@ -1978,10 +2220,11 @@ function App() {
   const refresh = useCallback(async () => {
     setDataLoading(true);
     try {
-      const [availability, events, friends, dashboard] = await Promise.all([
+      const [availability, events, friends, groups, dashboard] = await Promise.all([
         api("/api/availability"),
         api("/api/events"),
         api("/api/friends"),
+        api("/api/groups"),
         api("/api/dashboard")
       ]);
       setData((current) => ({
@@ -1989,6 +2232,7 @@ function App() {
         availability: availability.availability,
         events: events.events,
         friends: friends.users,
+        groups: groups.groups,
         dashboard: dashboard.dashboard
       }));
     } catch {
@@ -2034,6 +2278,12 @@ function App() {
   async function logout() {
     await api("/api/auth/logout", { method: "POST" });
     setUser(null);
+  }
+
+  async function refreshContext() {
+    const payload = await api("/api/me");
+    setUser(payload.user);
+    await refresh();
   }
 
   if (loading) return <main className="loading"><Clock /> Loading</main>;
@@ -2091,8 +2341,10 @@ function App() {
             onOpenSubscription={() => setActiveView("profile")}
           />
         )}
+        {activeView === "proposals" && <ProposalsView user={user} friends={data.friends} />}
         {activeView === "invites" && <InvitesView user={user} events={visibleEvents} refresh={refresh} />}
         {activeView === "free-time" && <FreeTimeView user={user} availability={data.availability} refresh={refresh} />}
+        {activeView === "groups" && <GroupsView user={user} groups={data.groups} onChanged={refreshContext} />}
         {activeView === "friends" && <FriendsView friends={data.friends} availability={data.availability} events={visibleEvents} />}
         {activeView === "games" && <GamesView games={data.games} searchGames={searchGames} />}
         {activeView === "profile" && <ProfileView user={user} onSaved={setUser} />}
