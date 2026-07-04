@@ -1,7 +1,7 @@
 # SquadSlot
 
 <p align="center">
-  <img src="public/squadslot-logo.png" alt="SquadSlot" width="420">
+  <img src="public/squadslot-logo-transparent.png" alt="SquadSlot" width="420">
 </p>
 
 SquadSlot is a self-hosted gaming calendar for friend groups. Share free time, find the best overlap, arrange sessions, vote on games, manage invitations, post Discord updates, and subscribe from a phone calendar.
@@ -10,7 +10,7 @@ SquadSlot is a self-hosted gaming calendar for friend groups. Share free time, f
 
 ## Highlights
 
-- Shared weekly calendar with grouped availability and event details
+- Pulse Board calendar with grouped availability, spanning events, Week/5-day modes, and responsive phone navigation
 - One-off or recurring availability with multi-day drag selection
 - Best-time finder that ranks the strongest player overlap
 - Event invitations shown in Events until accepted, declined, removed, or completed
