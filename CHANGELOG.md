@@ -18,7 +18,7 @@ Significant SquadSlot changes are recorded here by release date.
 
 - Rebuilt the calendar as the Pulse Board with true time-spanning availability and event blocks.
 - Added integrated best-slot ranking, Week/5-day modes, a compact Tonight/Upcoming rail, and docked creation controls.
-- Added responsive three-day calendar framing, icon-only phone actions, and compact event anatomy for narrow screens.
+- Added responsive three-day calendar framing, stable phone toolbars and forms, corrected calendar snap alignment, icon-only phone actions, and compact event anatomy for narrow screens.
 - Event times are now normalized to UTC and displayed in each account's configured timezone.
 - Squad owners can rotate invite codes, while users can create, join, and switch squads.
 - JSON backup and restore now include squads, proposals, Discord identities, UTC timestamps, and audit history.

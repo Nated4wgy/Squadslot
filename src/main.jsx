@@ -991,7 +991,7 @@ function EventForm({ games, friends, selectedDate, onSearchGames, onCreated, exp
   return (
     <form className={`pulse-session-dock${expanded ? " expanded" : ""}`} id="pulse-session-composer" onSubmit={submit}>
       <button className="pulse-dock-label" type="button" onClick={() => onToggle(!expanded)}><Plus size={18} /><span>New session</span></button>
-      <label><span>Date</span><input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
+      <label className="pulse-date-field"><span>Date</span><input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
       <label className="pulse-time-field"><span>Time</span><div><input type="time" value={form.startTime} onChange={(event) => setForm({ ...form, startTime: event.target.value })} /><i>-</i><input type="time" value={form.endTime} onChange={(event) => setForm({ ...form, endTime: event.target.value })} /></div></label>
       <label className="pulse-game-field"><span>Game</span><select value={form.steamAppId} onChange={(event) => chooseGame(event.target.value)}><option value="">Select a game</option>{games.map((game) => <option value={game.appId} key={game.appId}>{game.title}</option>)}</select></label>
       <button className="pulse-invite-trigger" type="button" onClick={() => onToggle(true)}><UsersRound size={17} /> {form.inviteIds.length ? `${form.inviteIds.length} invited` : "Select players"}</button>
