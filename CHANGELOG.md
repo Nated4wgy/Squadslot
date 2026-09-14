@@ -2,6 +2,26 @@
 
 Significant SquadSlot changes are recorded here by release date.
 
+## Unreleased - Visual Refinement
+
+### New Features
+
+- Added Steam artwork to the next event, invites, event summaries, voting options, and calendar popovers, with image fallbacks for older events.
+- Added opt-in device push notifications for pending invites and upcoming accepted/tentative sessions, independently of Discord.
+- Added per-device notification preferences, a delivery test, persistent signing keys, and notification links to the Events page.
+- Added duplicate-delivery prevention, expired-device cleanup, and subscription invalidation after password resets.
+
+### Improvements
+
+- Unified the calendar, dashboard, forms, and account screens with shared dark and light themes.
+- Matched the dark colour scheme to the Home Assistant Midnight palette: navy surfaces, warm white text, sky-blue accents, muted teal availability, and amber events.
+- Standardized headings, spacing, buttons, focus states, borders, and accent colours.
+- Simplified the dashboard with quieter sections and a clearer next-session highlight.
+- Grouped navigation links and improved calendar toolbar and session form layouts on laptops and tablets.
+- Fixed stretched invite avatars and narrow-phone overflow in weekly availability and session forms.
+- Improved availability contrast and kept short slots compact, with player details available in their popover.
+- Added an isolated browser layout review covering both themes, eleven screens, and six viewport sizes.
+
 ## 2026-07-04 - Squads, Proposals, And Safer Scheduling
 
 ### New Features

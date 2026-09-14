@@ -36,6 +36,9 @@ import {
   UsersRound
 } from "lucide-react";
 import "./styles.css";
+import "./theme.css";
+import { eventArtwork, gameImageSources } from "./game-art.js";
+import PushPreferences, { disableDevicePush } from "./PushPreferences.jsx";
 
 const calendarStartHour = 17;
 const calendarEndHour = 24;
@@ -130,14 +133,21 @@ function Skeleton({ rows = 3 }) {
   );
 }
 
-function SteamImage({ src, alt = "", className = "" }) {
-  const [failedSrc, setFailedSrc] = useState("");
+function SteamImage({ src, appId, alt = "", className = "" }) {
+  const sources = gameImageSources(src, appId);
+  return <SteamImageAttempt key={JSON.stringify(sources)} sources={sources} alt={alt} className={className} />;
+}
 
-  if (!src || failedSrc === src) {
+function SteamImageAttempt({ sources, alt, className }) {
+  const [attempt, setAttempt] = useState(0);
+  if (attempt >= sources.length) {
     return <span className={`image-fallback ${className}`.trim()}><Gamepad2 size={18} /></span>;
   }
+  return <img className={className} src={sources[attempt]} alt={alt} loading="lazy" decoding="async" onError={() => setAttempt((current) => current + 1)} />;
+}
 
-  return <img className={className} src={src} alt={alt} onError={() => setFailedSrc(src)} />;
+function EventGameImage({ event, className = "event-game-image" }) {
+  return <SteamImage {...eventArtwork(event)} className={className} />;
 }
 
 function useDebouncedSteamSearch(query, onSearchGames) {
@@ -292,9 +302,9 @@ function Sidebar({ user, activeView, setActiveView, onLogout }) {
       <div className="brand-lockup compact">
         <img className="brand-logo" src="/squadslot-logo-transparent.png" alt="SquadSlot" />
       </div>
-      <nav>
+      <nav aria-label="Main navigation">
         {nav.map(([id, label, Icon]) => (
-          <button className={activeView === id ? "active" : ""} key={id} onClick={() => setActiveView(id)}>
+          <button className={`${activeView === id ? "active" : ""}${["groups", "profile"].includes(id) ? " nav-section-start" : ""}`} aria-current={activeView === id ? "page" : undefined} key={id} onClick={() => setActiveView(id)}>
             <Icon size={18} /> {label}
           </button>
         ))}
@@ -319,6 +329,7 @@ function EventPopover({ event }) {
 
   return (
     <div className="event-popover" role="tooltip">
+      <EventGameImage event={event} />
       <strong>{event.title}</strong>
       <span>{event.gameTitle || "Game TBD"}</span>
       <span>{event.date}, {event.startTime} to {event.endTime}</span>
@@ -531,7 +542,7 @@ function CalendarGrid({ user, days, availability, events, bestSlots, onAvailabil
                       const placement = calendarPlacement(minutesLabel(block.start), minutesLabel(block.end));
                       const overlap = block.freeItems.length / maxOverlap;
                       return <div
-                        className={`availability-block pulse-availability-block availability-with-popover${block.isBest ? " best" : ""}`}
+                        className={`availability-block pulse-availability-block availability-with-popover${block.isBest ? " best" : ""}${block.end - block.start < 60 ? " short-block" : ""}`}
                         style={{ ...placement, "--overlap-opacity": 0.32 + (overlap * 0.48) }}
                         tabIndex={0}
                         key={`${date}-${block.start}-${block.playerIds.join("-")}`}
@@ -547,7 +558,6 @@ function CalendarGrid({ user, days, availability, events, bestSlots, onAvailabil
                     {dayEvents.map((item, eventIndex) => {
                       const accepted = item.invites.filter((invite) => invite.status === "accepted");
                       const canMove = item.ownerId === user.id || user.role === "admin";
-                      const selectedOption = item.gameOptions.find((option) => option.id === item.selectedGameOptionId) || item.gameOptions.find((option) => option.imageUrl);
                       const placement = calendarPlacement(item.startTime, item.endTime);
                       return <div
                         className={`event-block pulse-event-block event-with-popover${item.ready ? " event-ready" : ""}`}
@@ -561,7 +571,7 @@ function CalendarGrid({ user, days, availability, events, bestSlots, onAvailabil
                           event.dataTransfer.setData("text/event-duration", String(eventDurationHours(item)));
                         }}
                       >
-                        {selectedOption?.imageUrl ? <SteamImage src={selectedOption.imageUrl} className="pulse-event-art" /> : null}
+                        <EventGameImage event={item} className="pulse-event-art" />
                         <div className="pulse-event-copy">
                           <strong>{item.title}</strong>
                           <span>{item.gameTitle || "Game TBD"}</span>
@@ -1037,7 +1047,7 @@ function CalendarUtilityRail({ availability, events, onOpenEvents, onManageAvail
       <section>
         <button className="pulse-rail-heading" type="button" onClick={() => setTonightOpen(!tonightOpen)}><span><Zap size={18} /> Tonight</span>{tonightOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
         {tonightOpen ? <div className="pulse-free-list">
-          <div className="pulse-rail-summary"><span>Free players</span><strong>{freePlayers.length} online</strong></div>
+          <div className="pulse-rail-summary"><span>Free players</span><strong>{freePlayers.length} available</strong></div>
           {freePlayers.slice(0, 6).map((player) => <div className="pulse-free-person" key={player.userId}><Avatar user={player} size="small" /><strong>{player.displayName}</strong><span>{player.startTime <= nowTime ? "Free" : player.startTime}</span></div>)}
           {freePlayers.length === 0 ? <p>No availability logged for tonight.</p> : null}
           <button className="pulse-rail-action" type="button" onClick={onManageAvailability}>Manage free time</button>
@@ -1048,8 +1058,7 @@ function CalendarUtilityRail({ availability, events, onOpenEvents, onManageAvail
         {upcomingOpen ? <div className="pulse-upcoming-list">
           {upcoming.map((event) => {
             const accepted = event.invites.filter((invite) => invite.status === "accepted");
-            const selectedOption = event.gameOptions.find((option) => option.id === event.selectedGameOptionId) || event.gameOptions.find((option) => option.imageUrl);
-            return <article key={event.id}>{selectedOption?.imageUrl ? <SteamImage src={selectedOption.imageUrl} /> : <span className="image-fallback"><Gamepad2 size={18} /></span>}<div><strong>{event.title}</strong><span>{formatDate(event.date)} - {event.startTime}</span><small><UsersRound size={12} /> {accepted.length}/{event.maxPlayers} accepted</small></div>{event.ready ? <i><Check size={12} /></i> : null}</article>;
+            return <article key={event.id}><EventGameImage event={event} /><div><strong>{event.title}</strong><span>{formatDate(event.date)} - {event.startTime}</span><small><UsersRound size={12} /> {accepted.length}/{event.maxPlayers} accepted</small></div>{event.ready ? <i><Check size={12} /></i> : null}</article>;
           })}
           {upcoming.length === 0 ? <p>No sessions planned.</p> : null}
           <button className="pulse-view-events" type="button" onClick={onOpenEvents}>View all events</button>
@@ -1111,8 +1120,8 @@ function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, searchGa
         <div className="pulse-toolbar-actions">
           <button className="pulse-today-button" onClick={() => setWeekOffset(0)}>Today</button>
           <div className="pulse-view-switch"><button className={dayCount === 7 ? "active" : ""} onClick={() => setDayCount(7)}>Week</button><button className={dayCount === 5 ? "active" : ""} onClick={() => setDayCount(5)}>5 days</button></div>
-          <button className="pulse-free-button" onClick={() => openAvailability()}><Clock size={16} /> Log free time</button>
-          <button className="pulse-new-session" onClick={openSessionComposer}><Plus size={17} /> New session</button>
+          <button className="pulse-free-button" title="Log free time" onClick={() => openAvailability()}><Clock size={16} /> Log free time</button>
+          <button className="pulse-new-session" title="New session" onClick={openSessionComposer}><Plus size={17} /> New session</button>
         </div>
       </header>
       <div className="pulse-calendar-layout">
@@ -1177,10 +1186,13 @@ function EventInviteRow({ event, onStatus, onRemove }) {
 
   return (
     <article className="invite-row">
-      <div>
+      <div className="event-title-line">
+        <EventGameImage event={event} />
+        <div>
         <strong>{event.title}</strong>
         <span>{event.gameTitle || "Game TBD"} - {event.date}, {event.startTime} to {event.endTime}</span>
         <small>From {event.ownerName} - current: {invite.status}</small>
+        </div>
       </div>
       <div className="invite-actions">
         <button className={invite.status === "accepted" ? "selected" : ""} type="button" onClick={() => onStatus(event.id, "accepted")}>Accept</button>
@@ -1274,7 +1286,7 @@ function EventDetails({ user, event, refresh, onDelete, onLeave }) {
     <article className={`event-detail-card${event.ready ? " ready-card" : ""}`}>
       <div className="event-summary">
         <div className="event-title-line">
-          <Avatar user={{ displayName: event.ownerName, avatarUrl: event.ownerAvatarUrl, profileColor: event.ownerColor }} size="small" />
+          <EventGameImage event={event} />
           <div>
             <strong>{event.title}</strong>
             <span>{event.gameTitle || "Vote pending"} - {formatDate(event.date)}, {event.startTime} to {event.endTime}</span>
@@ -1301,8 +1313,8 @@ function EventDetails({ user, event, refresh, onDelete, onLeave }) {
             <div className="panel-heading"><Vote size={17} /><div><h3>Game vote</h3><p>One vote per invited player.</p></div></div>
             <div className="vote-grid">
               {event.gameOptions.map((option) => (
-                <button className={`${myVote === option.id ? "selected" : ""}${option.imageUrl ? " has-image" : ""}`} type="button" onClick={() => vote(option.id)} key={option.id}>
-                  {option.imageUrl && <SteamImage src={option.imageUrl} />}
+                <button className={`${myVote === option.id ? "selected" : ""} has-image`} type="button" onClick={() => vote(option.id)} key={option.id}>
+                  <SteamImage src={option.imageUrl} appId={option.steamAppId} />
                   <span><strong>{option.title}</strong><small>{option.voteCount} vote{option.voteCount === 1 ? "" : "s"}</small></span>
                   {event.selectedGameOptionId === option.id && <Sparkles size={16} />}
                 </button>
@@ -1633,7 +1645,7 @@ function GamesView({ games, searchGames }) {
           <div className="steam-results">
             {games.map((game) => (
               <button className="steam-result" key={game.appId} onClick={() => loadDetails(game.appId)}>
-                <SteamImage src={game.image} />
+                <SteamImage src={game.image} appId={game.appId} />
                 <div>
                   <strong>{game.title}</strong>
                   <span>{game.price || "Steam app"} - #{game.appId}</span>
@@ -1644,7 +1656,7 @@ function GamesView({ games, searchGames }) {
           <aside className="game-detail">
             {selected ? (
               <>
-                <SteamImage src={selected.image} className="game-detail-image" />
+                <SteamImage src={selected.image} appId={selected.appId} className="game-detail-image" />
                 <h2>{selected.title}</h2>
                 <p>{selected.shortDescription || "No Steam description available."}</p>
                 <div className="tag-list">
@@ -1686,6 +1698,7 @@ function DashboardView({ dashboard, setActiveView }) {
           <span className="eyebrow">Next accepted event</span>
           {dashboard.nextEvent ? (
             <>
+              <EventGameImage event={dashboard.nextEvent} className="next-event-art" />
               <h2>{dashboard.nextEvent.title}</h2>
               <p>{dashboard.nextEvent.gameTitle || "Game vote pending"}</p>
               <strong>{formatDate(dashboard.nextEvent.date)} at {dashboard.nextEvent.startTime}</strong>
@@ -1699,7 +1712,8 @@ function DashboardView({ dashboard, setActiveView }) {
         <section className="table-panel dashboard-panel">
           <div className="panel-heading"><Bell size={18} /><div><h2>Pending invites</h2><p>{dashboard.pendingInviteCount} waiting for your response.</p></div></div>
           {dashboard.pendingInvites.map((event) => (
-            <button className="dashboard-row" onClick={() => setActiveView("invites")} key={event.id}>
+            <button className="dashboard-row with-art" onClick={() => setActiveView("invites")} key={event.id}>
+              <EventGameImage event={event} />
               <span><strong>{event.title}</strong><small>{formatDate(event.date)} at {event.startTime}</small></span>
               <ChevronRight size={17} />
             </button>
@@ -1716,6 +1730,7 @@ function DashboardView({ dashboard, setActiveView }) {
                 <span className="overlap-count">{slot.count} free</span>
               </button>
             ))}
+            {dashboard.bestSlots.length === 0 && <p className="muted">No shared free time this week.</p>}
           </div>
         </section>
         <section className="table-panel dashboard-panel">
@@ -1723,7 +1738,7 @@ function DashboardView({ dashboard, setActiveView }) {
           <div className="suggestion-grid">
             {dashboard.recentSuggestions.map((game) => (
               <a href={`https://store.steampowered.com/app/${game.steamAppId}/`} target="_blank" rel="noreferrer" key={game.id}>
-                <SteamImage src={game.imageUrl} />
+                <SteamImage src={game.imageUrl} appId={game.steamAppId} />
                 <span><strong>{game.title}</strong><small>{game.suggestedBy}</small></span>
               </a>
             ))}
@@ -1759,7 +1774,8 @@ function TonightView({ dashboard, setActiveView }) {
         <section className="table-panel">
           <div className="panel-heading"><Clock size={18} /><div><h2>Tonight sessions</h2><p>Accepted and planned events.</p></div></div>
           {(tonight?.events || []).map((event) => (
-            <button className="dashboard-row" onClick={() => setActiveView("events")} key={event.id}>
+            <button className="dashboard-row with-art" onClick={() => setActiveView("events")} key={event.id}>
+              <EventGameImage event={event} />
               <span><strong>{event.title}</strong><small>{event.startTime}-{event.endTime} - {event.gameTitle || "Vote pending"}</small></span>
               <span>{event.invites.filter((invite) => invite.status === "accepted").length}/{event.maxPlayers}</span>
             </button>
@@ -1857,6 +1873,7 @@ function ProfileView({ user, onSaved }) {
           <button className="primary-button"><Settings size={16} /> Save profile</button>
           {message && <p className="muted">{message}</p>}
         </section>
+        <PushPreferences request={api} />
         <section className="table-panel calendar-subscription-panel">
           <div className="panel-heading">
             <RefreshCw size={18} />
@@ -2241,7 +2258,7 @@ function AdminView({ user }) {
 
 function App() {
   const [user, setUser] = useState(null);
-  const [activeView, setActiveView] = useState("dashboard");
+  const [activeView, setActiveView] = useState(() => new URL(window.location.href).searchParams.get("view") === "events" ? "events" : "dashboard");
   const [loading, setLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
@@ -2312,10 +2329,11 @@ function App() {
       ? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")
       : user.theme;
     document.documentElement.dataset.theme = preferredTheme || "dark";
-    document.documentElement.style.setProperty("--accent", user.accent || "#2fd3ba");
+    document.documentElement.style.setProperty("--accent", user.accent || "#6bc9ed");
   }, [user]);
 
   async function logout() {
+    await disableDevicePush(api).catch(() => {});
     await api("/api/auth/logout", { method: "POST" });
     setUser(null);
   }
@@ -2355,7 +2373,7 @@ function App() {
   return (
     <div className="app-shell">
       <Sidebar user={user} activeView={activeView} setActiveView={setActiveView} onLogout={logout} />
-      <main className="workspace">
+      <main className="workspace" data-view={activeView}>
         <button className="bell-button" onClick={() => setActiveView("invites")} aria-label="Open invites">
           <Bell size={18} />
           {pendingInviteCount > 0 && <span>{pendingInviteCount}</span>}

@@ -21,6 +21,7 @@ import {
   saveReminderSettings
 } from "./scheduling.js";
 import { getSteamGameDetails, searchSteamGames } from "./steam.js";
+import { addPushRoutes, runPushSweep } from "./push.js";
 
 if (process.env.SQUADSLOT_CLEAN_DEMO_DATA === "true") {
   cleanupDemoOnlyDatabase();
@@ -1237,7 +1238,7 @@ app.post("/api/auth/register", authRateLimit, (req, res) => {
       const userCount = db.prepare("SELECT COUNT(*) AS count FROM users").get().count;
       const role = userCount === 0 ? "admin" : "user";
       const inserted = db
-        .prepare("INSERT INTO users (username, display_name, role, password_hash) VALUES (?, ?, ?, ?)")
+        .prepare("INSERT INTO users (username, display_name, role, password_hash, accent) VALUES (?, ?, ?, ?, '#6bc9ed')")
         .run(username, displayName, role, passwordHash);
       const group = db.prepare("SELECT id FROM groups ORDER BY id LIMIT 1").get();
       db.prepare("INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, ?)")
@@ -1389,7 +1390,7 @@ app.put("/api/profile", requireAuth, (req, res) => {
   const preferredEnd = cleanText(req.body.preferredEnd, "23:00");
   const profileColor = cleanText(req.body.profileColor, "#2fd3ba");
   const theme = cleanText(req.body.theme, "dark");
-  const accent = cleanText(req.body.accent, "#2fd3ba");
+  const accent = cleanText(req.body.accent, "#6bc9ed");
   const discordUsername = cleanText(req.body.discordUsername).slice(0, 80);
   const discordUserId = cleanText(req.body.discordUserId).slice(0, 32);
 
@@ -2601,6 +2602,8 @@ app.use("/api", (error, _req, res, next) => {
   res.status(500).json({ error: "Server error." });
 });
 
+addPushRoutes(app, requireAuth);
+
 if (process.env.NODE_ENV === "production") {
   app.use(express.static(distDir));
   app.get("*", (_req, res) => res.sendFile(path.join(distDir, "index.html")));
@@ -2612,6 +2615,7 @@ app.listen(port, () => {
 
 const reminderTimer = setInterval(() => {
   runReminderSweep(notifyDiscord).catch((error) => console.error("Reminder sweep failed:", error.message));
+  runPushSweep().catch(() => console.error("Push reminder sweep failed."));
 }, 60 * 1000);
 reminderTimer.unref();
 
