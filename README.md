@@ -262,6 +262,18 @@ Common causes of restart loops:
 
 If old UI assets remain after an update, perform a hard refresh or remove and reinstall the PWA so the updated service worker takes control.
 
+## Device Push Notifications
+
+1. Host SquadSlot on HTTPS and set its public **App URL** in Admin (or `APP_URL` in Docker).
+2. Open **Profile > Device notifications** on each device and choose **Enable on this device**. Allow the browser permission request.
+3. Choose whether that device receives event invites, event reminders, or both. Use **Send test** to check delivery.
+
+On iPhone and iPad, install SquadSlot using **Share > Add to Home Screen**, then enable notifications from the installed app. Browser/OS notification settings and Focus modes can delay or suppress delivery.
+
+Pending invites are checked once a minute. Accepted and tentative sessions can receive reminders within 24 hours and within one hour of starting, using the administrator's existing tomorrow/starting-soon reminder switches. These run independently of Discord. Each notification opens the Events page. Signing out disables notifications on that device; password resets invalidate existing device registrations.
+
+VAPID signing keys are generated automatically and stored in the database. Preserve the Docker data volume during updates. Optional `PUSH_SUBJECT` can specify an HTTPS contact URL or `mailto:` address; otherwise the public App URL is used. Browser subscriptions are device-specific and are not included in JSON exports; enable notifications again after a JSON restore. No email service or Discord bot is required.
+
 ## Local Development
 
 Requirements:
@@ -311,6 +323,7 @@ SESSION_SECRET=replace-with-a-long-random-secret-at-least-32-characters npm star
 | `TZ` | `Europe/London` | Container timezone |
 | `SESSION_SECRET` | none in production | Signs login sessions; minimum 32 characters |
 | `APP_URL` | `http://localhost:8080` | Public base URL used for links and calendar feeds |
+| `PUSH_SUBJECT` | App URL | Optional HTTPS or mailto contact for Web Push signing |
 | `TRUST_PROXY` | `0` | Set to `1` behind a trusted reverse proxy |
 | `DISCORD_WEBHOOK_URL` | empty | Optional Discord webhook |
 | `DISCORD_BOT_NAME` | `SquadSlot` | Discord webhook display name |
@@ -352,3 +365,5 @@ SESSION_SECRET=replace-with-a-long-random-secret-at-least-32-characters npm star
 ## Steam Availability
 
 Steam search uses public Steam Store endpoints from the server. If Steam is temporarily unavailable or rate-limited, SquadSlot remains usable and game search results may be empty until Steam responds again.
+
+Event summaries use Steam artwork, including the dashboard's next session, invites, event lists, calendar popovers, and upcoming sessions. Images fall back to the game's Steam ID when an older event has no saved image URL. Artwork remains externally hosted; unavailable images show a neutral game icon. An undecided multi-game vote does not display an arbitrary game's artwork.

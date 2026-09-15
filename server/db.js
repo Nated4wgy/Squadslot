@@ -259,7 +259,7 @@ if (!userColumns.includes("theme")) {
   db.exec("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'dark'");
 }
 if (!userColumns.includes("accent")) {
-  db.exec("ALTER TABLE users ADD COLUMN accent TEXT NOT NULL DEFAULT '#2fd3ba'");
+  db.exec("ALTER TABLE users ADD COLUMN accent TEXT NOT NULL DEFAULT '#6bc9ed'");
 }
 if (!userColumns.includes("discord_username")) {
   db.exec("ALTER TABLE users ADD COLUMN discord_username TEXT NOT NULL DEFAULT ''");
@@ -427,7 +427,7 @@ export function publicUser(user, includeAuthState = false) {
     preferredEnd: user.preferred_end || "23:00",
     profileColor: user.profile_color || "#2fd3ba",
     theme: user.theme || "dark",
-    accent: user.accent || "#2fd3ba",
+    accent: user.accent || "#6bc9ed",
     discordUsername: user.discord_username || "",
     discordUserId: user.discord_user_id || "",
     activeGroupId: user.active_group_id || defaultGroupId,

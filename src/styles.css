@@ -3555,7 +3555,8 @@ textarea {
 
 @media (max-width: 720px) {
   .pulse-calendar-toolbar {
-    margin-right: 46px;
+    width: 100%;
+    margin-right: 0;
     grid-template-columns: 1fr;
     gap: 12px;
   }
@@ -3572,7 +3573,17 @@ textarea {
     width: 100%;
     overflow-x: auto;
     justify-content: flex-start;
+    gap: 6px;
     padding-bottom: 3px;
+  }
+
+  .pulse-today-button {
+    flex: 0 0 auto;
+    padding-inline: 10px;
+  }
+
+  .pulse-view-switch button {
+    padding-inline: 10px;
   }
 
   .pulse-free-button,
@@ -3585,6 +3596,7 @@ textarea {
 
   .best-slot-runway {
     grid-template-columns: 1fr;
+    overflow: hidden;
   }
 
   .best-slot-runway > strong {
@@ -3594,11 +3606,21 @@ textarea {
   }
 
   .best-slot-runway > div {
-    min-width: 520px;
+    width: 100%;
+    min-width: 0;
+    display: flex;
+    overflow-x: auto;
   }
 
-  .best-slot-runway {
-    overflow-x: auto;
+  .best-slot-runway button {
+    flex: 0 0 min(250px, 78vw);
+  }
+
+  .best-slot-runway .runway-empty {
+    width: 100%;
+    min-width: 0;
+    padding-block: 10px;
+    white-space: normal;
   }
 
   .pulse-week-head,
@@ -3625,7 +3647,20 @@ textarea {
   }
 
   .pulse-calendar-scroll {
+    scroll-padding-inline-start: 54px;
     scroll-snap-type: x proximity;
+  }
+
+  .sidebar nav,
+  .pulse-toolbar-actions,
+  .best-slot-runway > div {
+    scrollbar-width: none;
+  }
+
+  .sidebar nav::-webkit-scrollbar,
+  .pulse-toolbar-actions::-webkit-scrollbar,
+  .best-slot-runway > div::-webkit-scrollbar {
+    display: none;
   }
 
   .pulse-utility-rail {
@@ -3651,6 +3686,11 @@ textarea {
     grid-column: 1 / -1;
   }
 
+  .pulse-date-field,
+  .pulse-time-field {
+    grid-column: 1 / -1;
+  }
+
   .pulse-dock-label {
     width: 42px;
     grid-column: 1;
@@ -3658,6 +3698,8 @@ textarea {
   }
 
   .pulse-expand-dock {
+    grid-column: 2;
+    grid-row: 1;
     justify-self: end;
   }
 
@@ -3668,6 +3710,14 @@ textarea {
   .pulse-session-details .pulse-game-options,
   .pulse-session-details .invite-list {
     grid-column: 1;
+  }
+
+  .pulse-dock-stack > .utility-form-compact .segmented-control button {
+    color: #34424c;
+  }
+
+  .pulse-dock-stack > .utility-form-compact .segmented-control button.active {
+    color: #15191a;
   }
 
   .pulse-event-block {

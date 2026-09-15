@@ -11,6 +11,7 @@ services:
       TZ: ${TZ:-Europe/London}
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in a .env file before starting SquadSlot}
       APP_URL: ${APP_URL:-http://localhost:8080}
+      PUSH_SUBJECT: ${PUSH_SUBJECT:-}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       DISCORD_BOT_NAME: ${DISCORD_BOT_NAME:-SquadSlot}
       DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID:-}
