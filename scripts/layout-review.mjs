@@ -1,4 +1,4 @@
-/* global document */
+/* global document, window */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -6,7 +6,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 
 const temp = await mkdtemp(path.join(os.tmpdir(), "squadslot-layout-"));
 const listener = net.createServer();
@@ -26,13 +26,32 @@ const server = spawn(process.execPath, ["server/index.js"], {
 });
 let browser;
 const baseline = process.argv.includes("--baseline");
+const engine = process.argv.includes("--webkit") ? webkit : chromium;
+
+async function checkDateTimeBounds(page, context) {
+  const overflow = await page.locator('input[type="date"], input[type="time"], input[type="datetime-local"]').evaluateAll((inputs) => {
+    return inputs.filter((input) => input.getClientRects().length).flatMap((input) => {
+      const rect = input.getBoundingClientRect();
+      const parent = input.parentElement;
+      const bounds = parent.getBoundingClientRect();
+      const style = window.getComputedStyle(parent);
+      const left = bounds.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
+      const right = bounds.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
+      const sibling = input.nextElementSibling?.matches("i") ? input.nextElementSibling.nextElementSibling : input.nextElementSibling;
+      const overlaps = sibling?.matches("input") && Math.abs(rect.top - sibling.getBoundingClientRect().top) < 1 && rect.right > sibling.getBoundingClientRect().left;
+      return rect.left < left - 1 || rect.right > right + 1 || overlaps
+        ? [`${input.type} in ${parent.className || parent.tagName}`] : [];
+    });
+  });
+  assert.deepEqual(overflow, [], `${context}: date/time controls must fit their containers without overlapping`);
+}
 try {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     if (server.exitCode !== null) throw new Error("Preview server exited");
     try { if ((await fetch(`${base}/api/health`)).ok) break; } catch { /* Starting. */ }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  browser = await chromium.launch();
+  browser = await engine.launch();
   const contexts = [];
   const accounts = [];
   async function request(context, route, data, method = "POST") {
@@ -90,7 +109,7 @@ try {
     await request(contexts[0], "/api/profile", {...accounts[0], theme}, "PUT");
     await page.goto(base);
     await page.getByRole("heading", {name:"Dashboard", exact:true}).waitFor();
-    for (const [width, height] of baseline ? [[1440, 1000]] : [[1440, 1000], [1280, 900], [1024, 768], [768, 1024], [390, 844], [320, 740]]) {
+    for (const [width, height] of baseline ? [[1440, 1000]] : [[1440, 1000], [1280, 900], [1024, 768], [768, 1024], [430, 932], [390, 844], [320, 740]]) {
       await page.setViewportSize({width, height});
       for (const name of baseline ? ["Dashboard", "Calendar"] : viewNames) {
         await page.getByRole("navigation").getByRole("button", {name, exact:true}).click();
@@ -108,6 +127,7 @@ try {
             .map((el) => el.className || el.tagName);
         });
         if (!baseline) assert.deepEqual(overflow, [], `${theme} ${width}px ${name}: controls overflow`);
+        if (!baseline) await checkDateTimeBounds(page, `${theme} ${width}px ${name}`);
         if ((width === 1440 || width === 390) && ["Dashboard", "Calendar", "Free Time", "Profile"].includes(name)) {
           await page.screenshot({path: path.join(temp, `${theme}-${width}-${name.replaceAll(" ", "-").toLowerCase()}.png`), fullPage:true, animations:"disabled"});
         }
@@ -115,6 +135,7 @@ try {
           await page.getByRole("button", {name:"Log free time", exact:true}).click();
           await page.getByRole("button", {name:"Weekly", exact:true}).click();
           await page.getByRole("button", {name:"New session", exact:true}).first().click();
+          await checkDateTimeBounds(page, `${theme} ${width}px expanded composers`);
           const composerOverflow = await page.locator(".pulse-dock-stack").evaluate((el) => el.scrollWidth > el.clientWidth + 1);
           if (width === 390 || composerOverflow) await page.locator(".pulse-dock-stack").screenshot({path:path.join(temp, `${theme}-${width}-composers.png`), animations:"disabled"});
           assert(!composerOverflow, `${theme} ${width}px composer overflow; screenshots: ${temp}`);
@@ -125,9 +146,16 @@ try {
       await page.getByRole("navigation").getByRole("button", {name:"Calendar", exact:true}).click();
       await page.getByRole("button", {name:"New session", exact:true}).first().click();
       await page.getByLabel("Session title", {exact:true}).fill("Orientation check");
+      await page.locator(".pulse-date-field input").fill(dateAt(2));
+      await page.locator('.pulse-time-field input').first().fill("19:15");
+      await page.locator('.pulse-time-field input').last().fill("22:45");
       for (const [width, height] of [[1024, 768], [768, 1024], [844, 390], [390, 844]]) {
         await page.setViewportSize({width, height});
         assert.equal(await page.getByLabel("Session title", {exact:true}).inputValue(), "Orientation check");
+        assert.equal(await page.locator(".pulse-date-field input").inputValue(), dateAt(2));
+        assert.equal(await page.locator(".pulse-time-field input").first().inputValue(), "19:15");
+        assert.equal(await page.locator(".pulse-time-field input").last().inputValue(), "22:45");
+        await checkDateTimeBounds(page, `${theme} ${width}px rotated composers`);
         assert(!(await page.locator(".pulse-dock-stack").evaluate((el) => el.scrollWidth > el.clientWidth + 1)), `${theme} ${width}px rotated composer overflow`);
       }
     }
@@ -148,7 +176,7 @@ try {
     await page.locator(".next-event-art.image-fallback").waitFor();
   }
   assert.deepEqual(errors, [], "Browser runtime errors");
-  console.log(`Layout review passed. Screenshots: ${temp}`);
+  console.log(`${engine.name()} layout review passed. Screenshots: ${temp}`);
 } finally {
   await browser?.close();
   if (server.exitCode === null) {

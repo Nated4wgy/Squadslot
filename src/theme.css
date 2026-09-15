@@ -92,12 +92,26 @@ input, select, textarea,
 }
 
 input::placeholder, textarea::placeholder { color: var(--muted-ink); opacity: 0.85; }
+/* iOS date/time controls otherwise retain an intrinsic width inside grid tracks. */
+input:is([type="date"], [type="time"], [type="datetime-local"]) {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-inline-size: 0;
+}
+input::-webkit-date-and-time-value { min-width: 0; text-align: left; }
+input::-webkit-datetime-edit { min-width: 0; padding: 0; }
 input:focus, select:focus, textarea:focus {
   border-color: var(--accent-ink);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 label, .pulse-session-dock > label, .pulse-session-details label {
+  min-width: 0;
   color: var(--muted-ink);
   font-size: 0.84rem;
   font-weight: 600;
@@ -346,6 +360,7 @@ label, .pulse-session-dock > label, .pulse-session-details label {
 .pulse-date-field { grid-column: 1; }
 .pulse-session-details { border-color: var(--line-soft); grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .pulse-time-field i { color: var(--muted-ink); }
+.pulse-time-field > div { min-width: 0; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
 .pulse-expand-dock { width: 36px; }
 .pulse-session-details .search-inline { display: grid; grid-template-columns: minmax(0, 1fr) 42px; gap: 8px; }
 .pulse-session-details .search-inline button { min-height: 42px; }
