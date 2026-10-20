@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import webpush from "web-push";
 import { db, getSetting, setSetting } from "./db.js";
 import { getReminderSettings } from "./scheduling.js";
+import { asyncRoute } from "./validation.js";
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -127,7 +128,7 @@ export function addPushRoutes(app, requireAuth) {
     db.prepare("DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?").run(req.user.id, String(req.body.endpoint || ""));
     res.json({ ok: true });
   });
-  app.post("/api/push/test", requireAuth, async (req, res) => {
+  app.post("/api/push/test", requireAuth, asyncRoute(async (req, res) => {
     const record = db.prepare("SELECT * FROM push_subscriptions WHERE user_id = ? AND endpoint = ? AND session_version = ?")
       .get(req.user.id, String(req.body.endpoint || ""), req.user.session_version || 0);
     if (!record) return res.status(404).json({ error: "Enable notifications on this device first." });
@@ -143,5 +144,5 @@ export function addPushRoutes(app, requireAuth) {
       if ([404, 410].includes(error.statusCode)) db.prepare("DELETE FROM push_subscriptions WHERE id = ?").run(record.id);
       res.status(502).json({ error: "The push service did not accept the test. Try enabling notifications again." });
     }
-  });
+  }));
 }

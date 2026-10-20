@@ -23,7 +23,7 @@ async function fetchJsonWithTimeout(url) {
   try {
     const response = await fetch(url, { signal: controller.signal });
     if (!response.ok) throw new Error(`Steam request failed with ${response.status}`);
-    return response.json();
+    return await response.json();
   } finally {
     clearTimeout(timeout);
   }

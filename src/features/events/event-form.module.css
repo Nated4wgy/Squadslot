@@ -1,0 +1,32 @@
+.form { display: grid; grid-template-columns: 160px 230px minmax(120px, 1fr) auto auto 36px; align-items: end; gap: 12px; padding: 18px 0; border-block: 1px solid var(--line); color: var(--ink); min-width: 0; }
+.form label { display: grid; gap: 6px; min-width: 0; }
+.form :is(input, select, textarea) { width: 100%; min-width: 0; max-width: 100%; min-height: 40px; font-size: 0.85rem; }
+.form textarea { min-height: 92px; }
+.form button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.form :global(.pulse-dock-label) { grid-column: 1 / -1; width: max-content; padding: 0; border: 0; min-height: 28px; background: transparent; color: var(--ink); font-size: 1rem; font-weight: 600; }
+.form :global(.pulse-dock-label svg) { color: var(--accent-ink); }
+.form :global(.pulse-time-field > div) { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 5px; align-items: center; min-width: 0; }
+.form :global(.pulse-time-field i) { font-style: normal; color: var(--muted-ink); }
+.form :global(.pulse-invite-trigger), .form :global(.pulse-create-session), .form :global(.pulse-expand-dock) { min-height: 40px; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 0.8rem; background: var(--surface); color: var(--ink); }
+.form :global(.pulse-create-session) { background: var(--accent); color: #091722; border-color: transparent; font-weight: 600; }
+.form :global(.pulse-expand-dock) { width: 36px; padding: 0; }
+.form :global(.pulse-session-details) { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; border-top: 1px solid var(--line-soft); padding-top: 18px; }
+.form :global(.pulse-game-options), .form :global(.invite-list) { grid-column: 1 / -1; }
+.form :global(.pulse-game-options) { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.form :global(.search-inline) { display: grid; grid-template-columns: minmax(0, 1fr) 42px; gap: 8px; }
+.error { grid-column: 1 / -1; }
+@media (max-width: 1500px) {
+  .form { grid-template-columns: minmax(140px, 1fr) minmax(220px, 1.2fr) minmax(140px, 1fr); }
+  .form :global(.pulse-invite-trigger) { grid-column: 1; }
+  .form :global(.pulse-create-session) { grid-column: 2; }
+  .form :global(.pulse-expand-dock) { grid-column: 3; justify-self: end; }
+}
+@media (max-width: 720px) {
+  .form { grid-template-columns: minmax(0, 1fr) 36px; }
+  .form :global(.pulse-dock-label) { grid-column: 1; grid-row: 1; width: auto; justify-self: start; }
+  .form :global(.pulse-expand-dock) { grid-column: 2; grid-row: 1; }
+  .form :global(.pulse-date-field), .form :global(.pulse-time-field), .form :global(.pulse-game-field), .form :global(.pulse-invite-trigger), .form :global(.pulse-create-session) { grid-column: 1 / -1; }
+  .form :global(.pulse-session-details) { grid-template-columns: minmax(0, 1fr); }
+  .form :is(input, select, textarea) { font-size: 16px; }
+}
+@media (max-width: 400px) { .form :global(.two-col) { grid-template-columns: minmax(0, 1fr); } }

@@ -23,6 +23,7 @@ services:
       BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
       BACKUP_RETENTION: ${BACKUP_RETENTION:-14}
       TRUST_PROXY: ${TRUST_PROXY:-0}
+      TRUSTED_TUNNEL_IPS: ${TRUSTED_TUNNEL_IPS:-}
     volumes:
       - squadslot-data:/data
     healthcheck:

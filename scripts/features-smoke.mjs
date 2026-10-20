@@ -1,4 +1,9 @@
 import { spawn } from "node:child_process";
+import { utcEventRange } from "../server/time.js";
+
+function icsTime(date, time) {
+  return utcEventRange(date, time, "23:59", "Europe/London").startsAtUtc.replaceAll("-", "").replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
+}
 import { mkdtemp, rm } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
@@ -92,7 +97,7 @@ async function main() {
       body: JSON.stringify({ username: "admin", displayName: "Admin", password: "password123" })
     });
     assert(result.response.status === 201, "Admin registration failed.");
-    const adminCookie = result.cookie;
+    let adminCookie = result.cookie;
     const adminId = result.payload.user.id;
 
     result = await request("/api/profile", adminCookie, {
@@ -116,7 +121,12 @@ async function main() {
       method: "POST",
       body: JSON.stringify({ username: "friend", displayName: "Friend", password: "password123" })
     });
-    assert(result.response.status === 201, "Friend registration failed.");
+    assert(result.response.status === 202, "Friend should await approval.");
+    const requests = await request("/api/admin/users", adminCookie);
+    const pendingFriend = requests.payload.users.find((account) => account.username === "friend");
+    await request(`/api/admin/users/${pendingFriend.id}/approval`, adminCookie, { method: "POST", body: JSON.stringify({ decision: "approve" }) });
+    result = await request("/api/auth/login", "", { method: "POST", body: JSON.stringify({ username: "friend", password: "password123" }) });
+    assert(result.response.ok, "Approved friend login failed.");
     let friendCookie = result.cookie;
     const friendId = result.payload.user.id;
 
@@ -293,6 +303,7 @@ async function main() {
       method: "POST",
       body: JSON.stringify({
         title: "Feature test session",
+        force: true,
         date: eventDate,
         startTime: "20:00",
         endTime: "22:00",
@@ -321,6 +332,7 @@ async function main() {
       method: "POST",
       body: JSON.stringify({
         title: "Conflicting session",
+        force: true,
         date: eventDate,
         startTime: "21:00",
         endTime: "23:00",
@@ -410,8 +422,8 @@ async function main() {
     assert(
       result.payload.includes("SUMMARY:Free to play")
       && result.payload.includes("SUMMARY:Also free: Admin")
-      && result.payload.includes(`DTSTART:${freeDate.replaceAll("-", "")}T190000`)
-      && result.payload.includes(`DTSTART:${recurringDate.replaceAll("-", "")}T180000`),
+      && result.payload.includes(`DTSTART:${icsTime(freeDate, "19:00")}`)
+      && result.payload.includes(`DTSTART:${icsTime(recurringDate, "18:00")}`),
       "Live calendar feed did not include own or overlapping availability."
     );
     assert(
@@ -419,9 +431,9 @@ async function main() {
       "Live calendar feed exposed another user's unrelated availability."
     );
     assert(
-      result.payload.includes(`DTSTART:${eventDate.replaceAll("-", "")}T190000\r\nDTEND:${eventDate.replaceAll("-", "")}T200000`)
-      && result.payload.includes(`DTSTART:${eventDate.replaceAll("-", "")}T220000\r\nDTEND:${eventDate.replaceAll("-", "")}T230000`)
-      && !result.payload.includes(`DTSTART:${eventDate.replaceAll("-", "")}T190000\r\nDTEND:${eventDate.replaceAll("-", "")}T230000`),
+      result.payload.includes(`DTSTART:${icsTime(eventDate, "19:00")}\r\nDTEND:${icsTime(eventDate, "20:00")}`)
+      && result.payload.includes(`DTSTART:${icsTime(eventDate, "22:00")}\r\nDTEND:${icsTime(eventDate, "23:00")}`)
+      && !result.payload.includes(`DTSTART:${icsTime(eventDate, "19:00")}\r\nDTEND:${icsTime(eventDate, "23:00")}`),
       "Committed events did not remove their time from calendar availability."
     );
 
@@ -436,7 +448,7 @@ async function main() {
 
     result = await request(`/api/events/${eventId}`, adminCookie, {
       method: "PATCH",
-      body: JSON.stringify({ date: eventDate, startTime: "21:00", endTime: "23:00" })
+      body: JSON.stringify({ date: eventDate, startTime: "21:00", endTime: "23:00", force: true })
     });
     assert(result.response.ok, "Event reschedule failed.");
 
@@ -517,6 +529,7 @@ async function main() {
     );
 
     result = await request("/api/admin/backup", adminCookie);
+    result.payload = decryptBackup(result.payload, "feature-smoke-backup-key-123456");
     assert(
       result.response.ok
       && result.payload.tables.users.every((account) => (
@@ -539,9 +552,16 @@ async function main() {
 
     result = await request("/api/admin/backup/restore", adminCookie, {
       method: "POST",
-      body: JSON.stringify(backup)
+      body: JSON.stringify({ backup, confirmRestore: true })
     });
     assert(result.response.ok, "Backup restore failed with password reset state.");
+
+    result = await request("/api/events", adminCookie);
+    assert(result.response.status === 401, "Restoring a backup must invalidate old sessions.");
+    result = await request("/api/auth/login", "", { method: "POST", body: JSON.stringify({ username: "admin", password: "password123" }) });
+    adminCookie = result.cookie;
+    result = await request("/api/auth/login", "", { method: "POST", body: JSON.stringify({ username: "friend", password: "replacement789" }) });
+    friendCookie = result.cookie;
 
     result = await request("/api/groups", adminCookie);
     const originalGroupId = result.payload.activeGroupId;
@@ -580,3 +600,4 @@ main().catch((error) => {
   console.error(error.message);
   process.exitCode = 1;
 });
+import { decryptBackup } from "../server/backup-crypto.js";

@@ -29,12 +29,17 @@ export function readSessionCookie(req) {
   const token = req.cookies?.[COOKIE_NAME];
   if (!token) return null;
 
-  const [payload, signature] = token.split(".");
-  if (!payload || !signature || sign(payload) !== signature) return null;
+  const [payload, signature, extra] = token.split(".");
+  if (!payload || !signature || extra !== undefined) return null;
+  const expected = Buffer.from(sign(payload));
+  const supplied = Buffer.from(signature);
+  if (expected.length !== supplied.length || !crypto.timingSafeEqual(expected, supplied)) return null;
 
   try {
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    if (!parsed.userId || parsed.exp < Date.now()) return null;
+    if (!Number.isSafeInteger(parsed.userId) || parsed.userId <= 0
+      || !Number.isFinite(parsed.exp) || parsed.exp <= Date.now()
+      || !Number.isSafeInteger(parsed.sessionVersion ?? 0) || (parsed.sessionVersion ?? 0) < 0) return null;
     return {
       userId: parsed.userId,
       sessionVersion: Number(parsed.sessionVersion || 0)

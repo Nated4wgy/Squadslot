@@ -12,7 +12,6 @@ import { isValidDiscordWebhookUrl, postDiscordUpdate } from "./discord.js";
 import { buildDiscordNotification, getNotificationSettings, saveNotificationSettings } from "./notifications.js";
 import {
   addDateDays,
-  dateString,
   eventsToIcs,
   expandAvailability,
   findBestSlots,
@@ -22,6 +21,11 @@ import {
 } from "./scheduling.js";
 import { getSteamGameDetails, searchSteamGames } from "./steam.js";
 import { addPushRoutes, runPushSweep } from "./push.js";
+import { asyncRoute, dateRange, isDateString, validNewPassword } from "./validation.js";
+import { addAvailabilityEditingRoutes, matchesRuleDate } from "./availability-editing.js";
+import { backupEncryptionReady, decryptBackup, encryptBackup, MAX_BACKUP_BYTES, restoreOptions } from "./backup-crypto.js";
+import { localInstant, localSegments, utcEventRange, timeValidationMessage } from "./time.js";
+import { configureProxy, installStorageLimits, rateLimit } from "./protection.js";
 
 if (process.env.SQUADSLOT_CLEAN_DEMO_DATA === "true") {
   cleanupDemoOnlyDatabase();
@@ -32,16 +36,20 @@ const port = Number(process.env.PORT || 8080);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "..", "dist");
 const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
-const authAttempts = new Map();
+const authRateLimit = rateLimit({ limit: 25, windowMs: 15 * 60 * 1000 });
+installStorageLimits(db);
 const databasePath = process.env.DATABASE_PATH || path.join(process.cwd(), "data", "squadslot.db");
 const backupDir = path.resolve(process.env.BACKUP_DIR || path.join(path.dirname(databasePath), "backups"));
 const automaticBackupsEnabled = process.env.AUTO_BACKUP_ENABLED === "true";
-const backupIntervalHours = Math.max(1, Number(process.env.BACKUP_INTERVAL_HOURS || 24));
-const backupRetention = Math.max(1, Number(process.env.BACKUP_RETENTION || 14));
-
-if (process.env.TRUST_PROXY === "1" || process.env.TRUST_PROXY === "true") {
-  app.set("trust proxy", 1);
+function boundedBackupSetting(value, fallback, maximum) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 1 && number <= maximum ? number : fallback;
 }
+const backupIntervalHours = boundedBackupSetting(process.env.BACKUP_INTERVAL_HOURS, 24, 168);
+const backupRetention = boundedBackupSetting(process.env.BACKUP_RETENTION, 14, 365);
+const backupFilename = /^squadslot-\d{8}T\d{6}Z(?:-[a-f0-9]{16})?\.json\.enc$/;
+
+configureProxy(app);
 
 app.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -67,6 +75,7 @@ app.use((_req, res, next) => {
 app.post("/discord/interactions", express.raw({ type: "application/json", limit: "256kb" }), handleDiscordInteraction);
 
 app.use("/api", (req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
   const hasBody = req.get("content-length") || req.get("transfer-encoding");
   if (unsafeMethods.has(req.method) && hasBody && !req.is("application/json")) {
     return res.status(415).json({ error: "API requests must use application/json." });
@@ -74,8 +83,12 @@ app.use("/api", (req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
+const apiRateLimit = rateLimit({ limit: 600, windowMs: 60000 });
+app.use("/api", (req, res, next) => {
+  if (req.path === "/health") return next();
+  return apiRateLimit(req, res, next);
+});
 
 function firstForwardedHeader(value) {
   return value?.split(",")[0]?.trim();
@@ -103,9 +116,10 @@ function allowedOrigins(req) {
   const forwardedProto = firstForwardedHeader(req.get("x-forwarded-proto"));
 
   addHostOrigins(origins, host);
-  addHostOrigins(origins, forwardedHost);
+  const trustForwarded = app.get("trust proxy fn")(req.socket.remoteAddress, 0);
+  if (trustForwarded) addHostOrigins(origins, forwardedHost);
   if (host) origins.add(`${req.protocol}://${host}`);
-  if (forwardedHost && forwardedProto) origins.add(`${forwardedProto}://${forwardedHost}`);
+  if (trustForwarded && forwardedHost && forwardedProto) origins.add(`${forwardedProto}://${forwardedHost}`);
 
   origins.add(originFromUrl(process.env.APP_URL));
   origins.add(originFromUrl(getSetting("appUrl", "")));
@@ -136,7 +150,7 @@ app.use("/api", (req, res, next) => {
 app.use((req, _res, next) => {
   const session = readSessionCookie(req);
   const user = session ? db.prepare("SELECT * FROM users WHERE id = ?").get(session.userId) : null;
-  req.user = user && Number(user.session_version || 0) === session.sessionVersion ? user : null;
+  req.user = user?.account_status === "approved" && Number(user.session_version || 0) === session.sessionVersion ? user : null;
   if (req.user) {
     let membership = db.prepare(`
       SELECT gm.group_id AS groupId, gm.role, g.name, g.timezone
@@ -172,6 +186,19 @@ app.use("/api", (req, res, next) => {
   });
 });
 
+const writeRateLimit = rateLimit({ limit: 120, windowMs: 60000 }, (req) => String(req.user.id));
+app.use("/api", (req, res, next) => {
+  if (!req.user || !unsafeMethods.has(req.method)) return next();
+  return writeRateLimit(req, res, next);
+});
+app.use(["/api/admin/backup", "/api/admin/backups"], requireAdmin, rateLimit(
+  { limit: 30, windowMs: 15 * 60000 }, (req) => String(req.user.id)
+));
+
+// Authenticate and check origin before accepting a larger restore upload.
+app.post("/api/admin/backup/restore", requireAdmin, express.json({ limit: MAX_BACKUP_BYTES + 1024 }));
+app.use(express.json({ limit: "2mb" }));
+
 function requireAuth(req, res, next) {
   if (!req.user) return res.status(401).json({ error: "You need to sign in first." });
   next();
@@ -206,7 +233,10 @@ function handleDiscordInteraction(req, res) {
   const publicKeyHex = getSetting("discordPublicKey", process.env.DISCORD_PUBLIC_KEY || "");
   const signature = req.get("x-signature-ed25519") || "";
   const timestamp = req.get("x-signature-timestamp") || "";
-  if (!/^[0-9a-f]{64}$/i.test(publicKeyHex) || !/^[0-9a-f]+$/i.test(signature) || !timestamp) {
+  const timestampSeconds = Number(timestamp);
+  if (!/^[0-9a-f]{64}$/i.test(publicKeyHex) || !/^[0-9a-f]{128}$/i.test(signature)
+    || !/^\d+$/.test(timestamp) || !Number.isSafeInteger(timestampSeconds)
+    || Math.abs(Date.now() / 1000 - timestampSeconds) > 300) {
     return res.status(401).send("Invalid request signature.");
   }
   try {
@@ -238,8 +268,13 @@ function handleDiscordInteraction(req, res) {
   if (interaction.type !== 3 || !match) return discordInteractionReply(res, "That SquadSlot action is no longer supported.");
 
   const discordUserId = interaction.member?.user?.id || interaction.user?.id;
-  const user = db.prepare("SELECT * FROM users WHERE discord_user_id = ?").get(discordUserId);
+  if (!discordUserId) return discordInteractionReply(res, "Discord user identity is missing.");
+  const matches = db.prepare("SELECT * FROM users WHERE discord_user_id = ?").all(discordUserId);
+  if (matches.length > 1) return discordInteractionReply(res, "This Discord ID is linked to multiple accounts. Remove the duplicate links in SquadSlot first.");
+  const user = matches[0];
   if (!user) return discordInteractionReply(res, "Link your Discord user ID in your SquadSlot profile first.");
+  if (user.account_status !== "approved") return discordInteractionReply(res, "Your SquadSlot account needs administrator approval.");
+  if (user.must_change_password) return discordInteractionReply(res, "Change your temporary password in SquadSlot first.");
   const eventId = Number(match[1]);
   let status = match[2];
   const event = db.prepare(`
@@ -250,14 +285,17 @@ function handleDiscordInteraction(req, res) {
   const membership = db.prepare("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?").get(event.groupId, user.id);
   const invite = db.prepare("SELECT status FROM event_invites WHERE event_id = ? AND user_id = ?").get(eventId, user.id);
   if (!membership || !invite) return discordInteractionReply(res, "You are not invited to this event.");
+  if (new Date(event.endsAtUtc).getTime() <= Date.now()) return discordInteractionReply(res, "This event has ended.");
+  if (invite.status === status) return discordInteractionReply(res, `Your response for ${event.title} is already ${status}.`);
 
   if (status === "accepted") {
     const conflicts = eventConflicts(user.id, event.groupId, event.startsAtUtc, event.endsAtUtc, eventId);
     if (conflicts.length) return discordInteractionReply(res, `Conflict: you already have ${conflicts[0].title} during this time. Resolve it in SquadSlot.`);
-    const accepted = db.prepare("SELECT COUNT(*) AS count FROM event_invites WHERE event_id = ? AND status = 'accepted'").get(eventId).count;
+    while (promoteWaitlist(eventId)) { /* Fill vacancies in queue order before admitting a new response. */ }
+    const accepted = db.prepare("SELECT COUNT(*) AS count FROM event_invites WHERE event_id = ? AND user_id != ? AND status = 'accepted'").get(eventId, user.id).count;
     if (accepted >= event.maxPlayers) status = "waitlisted";
   }
-  db.prepare("UPDATE event_invites SET status = ? WHERE event_id = ? AND user_id = ?").run(status, eventId, user.id);
+  setInviteStatus(eventId, user.id, status);
   db.prepare("UPDATE events SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(eventId);
   if (["declined", "tentative"].includes(status) && invite.status === "accepted") promoteWaitlist(eventId);
   audit(user.id, `event.rsvp.${status}`, "event", eventId, { source: "discord" }, event.groupId);
@@ -266,10 +304,6 @@ function handleDiscordInteraction(req, res) {
 
 function cleanText(value, fallback = "") {
   return String(value ?? fallback).trim();
-}
-
-function isDateString(value) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 function isTimeString(value) {
@@ -314,13 +348,14 @@ function calendarTokenHash(token) {
 }
 
 function publicBaseUrl(req) {
-  const configured = cleanText(process.env.APP_URL || getSetting("appUrl", "")).replace(/\/+$/, "");
+  const configured = cleanText(getSetting("appUrl", process.env.APP_URL || "")).replace(/\/+$/, "");
   if (configured && isValidHttpUrl(configured)) return configured;
 
   const forwardedHost = firstForwardedHeader(req.get("x-forwarded-host"));
   const forwardedProto = firstForwardedHeader(req.get("x-forwarded-proto"));
-  const host = forwardedHost || req.get("host");
-  const protocol = forwardedProto || req.protocol;
+  const trustForwarded = app.get("trust proxy fn")(req.socket.remoteAddress, 0);
+  const host = (trustForwarded && forwardedHost) || req.get("host");
+  const protocol = (trustForwarded && forwardedProto) || req.protocol;
   return `${protocol}://${host}`;
 }
 
@@ -330,21 +365,6 @@ function calendarSubscriptionUrls(req, token) {
     httpsUrl,
     webcalUrl: httpsUrl.replace(/^https?:\/\//, "webcal://")
   };
-}
-
-function authRateLimit(req, res, next) {
-  const key = req.ip || req.socket.remoteAddress || "unknown";
-  const now = Date.now();
-  const windowMs = 15 * 60 * 1000;
-  const attempts = (authAttempts.get(key) || []).filter((timestamp) => now - timestamp < windowMs);
-
-  if (attempts.length >= 25) {
-    return res.status(429).json({ error: "Too many auth attempts. Try again later." });
-  }
-
-  attempts.push(now);
-  authAttempts.set(key, attempts);
-  next();
 }
 
 function isPositiveInteger(value) {
@@ -365,7 +385,7 @@ function backupTables() {
                preferred_start AS preferredStart, preferred_end AS preferredEnd,
                profile_color AS profileColor, theme, accent, discord_username AS discordUsername,
                discord_user_id AS discordUserId, active_group_id AS activeGroupId,
-               must_change_password AS mustChangePassword, session_version AS sessionVersion,
+               must_change_password AS mustChangePassword, session_version AS sessionVersion, account_status AS accountStatus,
                created_at AS createdAt
         FROM users ORDER BY id
       `)
@@ -389,7 +409,7 @@ function backupTables() {
       `)
       .all(),
     eventInvites: db
-      .prepare("SELECT event_id AS eventId, user_id AS userId, status FROM event_invites ORDER BY event_id, user_id")
+      .prepare("SELECT event_id AS eventId, user_id AS userId, status, waitlisted_at AS waitlistedAt FROM event_invites ORDER BY event_id, user_id")
       .all(),
     availabilityRules: db.prepare(`
       SELECT id, group_id AS groupId, user_id AS userId, weekday, start_time AS startTime, end_time AS endTime,
@@ -467,65 +487,43 @@ function backupPayload() {
   };
 }
 
-function encryptBackup(payload) {
-  const secret = process.env.BACKUP_ENCRYPTION_KEY;
-  if (!secret || secret.length < 16) throw new Error("BACKUP_ENCRYPTION_KEY must contain at least 16 characters.");
-  const iv = crypto.randomBytes(12);
-  const key = crypto.scryptSync(secret, "squadslot-backup-v1", 32);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload), "utf8"), cipher.final()]);
-  return JSON.stringify({
-    format: "squadslot-encrypted-backup",
-    version: 1,
-    algorithm: "aes-256-gcm",
-    iv: iv.toString("base64"),
-    tag: cipher.getAuthTag().toString("base64"),
-    data: encrypted.toString("base64")
-  });
-}
-
-function decryptBackup(contents) {
-  const envelope = JSON.parse(contents);
-  if (envelope.format !== "squadslot-encrypted-backup") return envelope;
-  const secret = process.env.BACKUP_ENCRYPTION_KEY;
-  if (!secret) throw new Error("BACKUP_ENCRYPTION_KEY is required to restore this backup.");
-  const key = crypto.scryptSync(secret, "squadslot-backup-v1", 32);
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(envelope.iv, "base64"));
-  decipher.setAuthTag(Buffer.from(envelope.tag, "base64"));
-  return JSON.parse(Buffer.concat([
-    decipher.update(Buffer.from(envelope.data, "base64")),
-    decipher.final()
-  ]).toString("utf8"));
-}
-
 function backupFiles() {
-  fs.mkdirSync(backupDir, { recursive: true });
+  fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
   return fs.readdirSync(backupDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && /^squadslot-\d{8}T\d{6}Z\.json\.enc$/.test(entry.name))
+    .filter((entry) => entry.isFile() && backupFilename.test(entry.name))
     .map((entry) => {
       const stats = fs.statSync(path.join(backupDir, entry.name));
       return { name: entry.name, size: stats.size, createdAt: stats.birthtime.toISOString() };
     })
-    .sort((a, b) => b.name.localeCompare(a.name));
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.name.localeCompare(a.name));
 }
 
 function createEncryptedBackup(actorId = null) {
-  fs.mkdirSync(backupDir, { recursive: true });
+  fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
   const payload = backupPayload();
   const stamp = payload.exportedAt.replace(/[-:]/g, "").replace(/\.\d{3}/, "");
-  const name = `squadslot-${stamp}.json.enc`;
+  const name = `squadslot-${stamp}-${crypto.randomBytes(8).toString("hex")}.json.enc`;
   const destination = path.join(backupDir, name);
   const temporary = `${destination}.tmp`;
-  fs.writeFileSync(temporary, encryptBackup(payload), { encoding: "utf8", mode: 0o600 });
-  fs.renameSync(temporary, destination);
+  const encrypted = encryptBackup(payload);
+  fs.writeFileSync(temporary, encrypted, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  try {
+    fs.renameSync(temporary, destination);
+  } finally {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+  }
   for (const stale of backupFiles().slice(backupRetention)) fs.unlinkSync(path.join(backupDir, stale.name));
   audit(actorId, "backup.created", "backup", name, { encrypted: true, automatic: actorId === null });
   return { name, exportedAt: payload.exportedAt };
 }
 
 function safeBackupPath(name) {
-  if (!/^squadslot-\d{8}T\d{6}Z\.json\.enc$/.test(name)) throw new Error("Backup filename is invalid.");
-  return path.join(backupDir, name);
+  if (!backupFilename.test(name)) throw new Error("Backup filename is invalid.");
+  const file = path.join(backupDir, name);
+  const stat = fs.lstatSync(file, { throwIfNoEntry: false });
+  if (stat && (!stat.isFile() || stat.isSymbolicLink())) throw new Error("Backup must be a regular file.");
+  if (stat && stat.size > MAX_BACKUP_BYTES) throw new Error("Backup exceeds the 32 MB file limit.");
+  return file;
 }
 
 function validateBackup(payload) {
@@ -565,19 +563,21 @@ function validateBackup(payload) {
   }
 
   if (users.length === 0) throw new Error("Backup must contain at least one user.");
-  if (!users.some((user) => user.role === "admin")) throw new Error("Backup must contain at least one admin user.");
+  if (!users.some((user) => user.role === "admin" && (user.accountStatus ?? "approved") === "approved")) throw new Error("Backup must contain at least one approved admin user.");
 
   for (const user of users) {
     if (!isPositiveInteger(user.id)) throw new Error("Backup contains an invalid user id.");
     if (!/^[a-z0-9_.-]{3,24}$/.test(String(user.username || ""))) throw new Error("Backup contains an invalid username.");
     if (!["admin", "user"].includes(user.role)) throw new Error("Backup contains an invalid user role.");
+    if (!["approved", "pending"].includes(user.accountStatus ?? "approved")) throw new Error("Backup contains an invalid account status.");
+    if (user.accountStatus === "pending" && user.role !== "user") throw new Error("Pending accounts cannot be administrators.");
     if (!user.passwordHash || typeof user.passwordHash !== "string") throw new Error("Backup contains an invalid password hash.");
   }
 
   return tables;
 }
 
-function restoreBackupTables(tables) {
+function restoreBackupTables(tables, { revokeCalendarLinks = true } = {}) {
   const restore = db.transaction(() => {
     db.prepare("DELETE FROM audit_log").run();
     db.prepare("DELETE FROM proposal_votes").run();
@@ -608,8 +608,8 @@ function restoreBackupTables(tables) {
         id, username, display_name, role, password_hash, avatar_url, timezone,
         favorite_games, preferred_start, preferred_end, profile_color, theme,
         accent, discord_username, discord_user_id, active_group_id,
-        must_change_password, session_version, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        must_change_password, session_version, created_at, account_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const user of tables.users) {
       insertUser.run(
@@ -630,8 +630,9 @@ function restoreBackupTables(tables) {
         user.discordUserId || "",
         user.activeGroupId || null,
         user.mustChangePassword ? 1 : 0,
-        Number(user.sessionVersion || 0),
-        user.createdAt
+        crypto.randomBytes(6).readUIntBE(0, 6),
+        user.createdAt,
+        user.accountStatus ?? "approved"
       );
     }
 
@@ -652,18 +653,22 @@ function restoreBackupTables(tables) {
     }
     const memberships = tables.groupMembers?.length
       ? tables.groupMembers
-      : tables.users.map((user) => ({ groupId: restoredGroups[0].id, userId: user.id, role: user.role === "admin" ? "owner" : "member", joinedAt: user.createdAt }));
+      : tables.users.filter((user) => user.accountStatus !== "pending").map((user) => ({ groupId: restoredGroups[0].id, userId: user.id, role: user.role === "admin" ? "owner" : "member", joinedAt: user.createdAt }));
     const insertMember = db.prepare("INSERT INTO group_members (group_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)");
-    for (const member of memberships) insertMember.run(member.groupId, member.userId, member.role || "member", member.joinedAt);
+    const pendingIds = new Set(tables.users.filter((user) => user.accountStatus === "pending").map((user) => user.id));
+    for (const member of memberships) {
+      if (!pendingIds.has(member.userId)) insertMember.run(member.groupId, member.userId, member.role || "member", member.joinedAt);
+    }
     for (const user of tables.users) {
-      if (!user.activeGroupId) db.prepare("UPDATE users SET active_group_id = ? WHERE id = ?").run(restoredGroups[0].id, user.id);
+      if (pendingIds.has(user.id)) db.prepare("UPDATE users SET active_group_id = NULL WHERE id = ?").run(user.id);
+      else if (!user.activeGroupId) db.prepare("UPDATE users SET active_group_id = ? WHERE id = ?").run(restoredGroups[0].id, user.id);
     }
 
     const insertCalendarSubscription = db.prepare(`
       INSERT INTO calendar_subscriptions (user_id, token_hash, created_at, last_used_at)
       VALUES (?, ?, ?, ?)
     `);
-    for (const subscription of tables.calendarSubscriptions || []) {
+    for (const subscription of revokeCalendarLinks ? [] : tables.calendarSubscriptions || []) {
       insertCalendarSubscription.run(
         subscription.userId,
         subscription.tokenHash,
@@ -721,9 +726,9 @@ function restoreBackupTables(tables) {
       );
     }
 
-    const insertInvite = db.prepare("INSERT INTO event_invites (event_id, user_id, status) VALUES (?, ?, ?)");
+    const insertInvite = db.prepare("INSERT INTO event_invites (event_id, user_id, status, waitlisted_at) VALUES (?, ?, ?, ?)");
     for (const invite of tables.eventInvites) {
-      insertInvite.run(invite.eventId, invite.userId, invite.status || "invited");
+      insertInvite.run(invite.eventId, invite.userId, invite.status || "invited", invite.status === "waitlisted" ? (Number.isSafeInteger(invite.waitlistedAt) ? invite.waitlistedAt : 0) : null);
     }
 
     const insertRule = db.prepare(`
@@ -856,7 +861,7 @@ function eventRows(where = "", params = [], groupId = null) {
   const invites = db
     .prepare(`
       SELECT ei.event_id AS eventId, ei.user_id AS userId, u.display_name AS displayName,
-             u.avatar_url AS avatarUrl, u.profile_color AS profileColor, ei.status
+             u.avatar_url AS avatarUrl, u.profile_color AS profileColor, ei.status, ei.waitlisted_at AS waitlistedAt
       FROM event_invites ei
       JOIN users u ON u.id = ei.user_id
       WHERE ei.event_id IN (${placeholders})
@@ -925,19 +930,13 @@ function eventForTimezone(event, timezone) {
     startTime: start.toFormat("HH:mm"),
     endTime: end.toFormat("HH:mm"),
     displayTimezone: timezone,
+    endDate: end.toISODate(),
     crossesDay: start.toISODate() !== end.toISODate()
   };
 }
 
 function eventsForTimezone(events, timezone) {
   return events.map((event) => eventForTimezone(event, timezone));
-}
-
-function utcEventRange(date, startTime, endTime, timezone) {
-  const start = DateTime.fromISO(`${date}T${startTime}`, { zone: timezone });
-  let end = DateTime.fromISO(`${date}T${endTime}`, { zone: timezone });
-  if (!start.isValid || !end.isValid || end <= start) return null;
-  return { startsAtUtc: start.toUTC().toISO(), endsAtUtc: end.toUTC().toISO() };
 }
 
 function eventInActiveGroup(eventId, groupId) {
@@ -950,20 +949,33 @@ function eventInActiveGroup(eventId, groupId) {
   `).get(eventId, groupId);
 }
 
-function eventConflicts(userId, groupId, startsAtUtc, endsAtUtc, excludeEventId = null) {
+function eventConflicts(userId, _groupId, startsAtUtc, endsAtUtc, excludeEventId = null) {
   return db.prepare(`
     SELECT e.id, e.title, e.starts_at_utc AS startsAtUtc, e.ends_at_utc AS endsAtUtc
     FROM events e
     JOIN event_invites ei ON ei.event_id = e.id
-    WHERE e.group_id = ? AND ei.user_id = ?
+    WHERE ei.user_id = ?
       AND ei.status IN ('accepted', 'tentative')
       AND e.starts_at_utc < ? AND e.ends_at_utc > ?
       AND (? IS NULL OR e.id != ?)
     ORDER BY e.starts_at_utc
-  `).all(groupId, userId, endsAtUtc, startsAtUtc, excludeEventId, excludeEventId);
+  `).all(userId, endsAtUtc, startsAtUtc, excludeEventId, excludeEventId);
+}
+
+function setInviteStatus(eventId, userId, status) {
+  const previous = db.prepare("SELECT status, waitlisted_at AS queued FROM event_invites WHERE event_id = ? AND user_id = ?").get(eventId, userId);
+  const last = db.prepare("SELECT MAX(waitlisted_at) AS value FROM event_invites WHERE event_id = ?").get(eventId).value || 0;
+  const queued = status === "waitlisted" ? (previous?.status === "waitlisted" && previous.queued !== null ? previous.queued : Math.max(Date.now(), last + 1)) : null;
+  db.prepare("UPDATE event_invites SET status = ?, waitlisted_at = ? WHERE event_id = ? AND user_id = ?").run(status, queued, eventId, userId);
+}
+
+function schedulingConflicts(userIds, range, excludeEventId = null) {
+  return [...new Set(userIds)].filter(id => eventConflicts(id, null, range.startsAtUtc, range.endsAtUtc, excludeEventId).length);
 }
 
 function promoteWaitlist(eventId) {
+  const event = db.prepare("SELECT group_id AS groupId, starts_at_utc AS startsAtUtc, ends_at_utc AS endsAtUtc FROM events WHERE id = ?").get(eventId);
+  if (!event || new Date(event.endsAtUtc).getTime() <= Date.now()) return null;
   const capacity = db.prepare(`
     SELECT e.max_players AS maxPlayers,
            SUM(CASE WHEN ei.status = 'accepted' THEN 1 ELSE 0 END) AS accepted
@@ -971,14 +983,16 @@ function promoteWaitlist(eventId) {
     WHERE e.id = ? GROUP BY e.id
   `).get(eventId);
   if (!capacity || Number(capacity.accepted || 0) >= capacity.maxPlayers) return null;
-  const next = db.prepare(`
-    SELECT user_id AS userId FROM event_invites
-    WHERE event_id = ? AND status = 'waitlisted'
-    ORDER BY rowid LIMIT 1
-  `).get(eventId);
+  const candidates = db.prepare(`
+    SELECT ei.user_id AS userId FROM event_invites ei
+    JOIN users u ON u.id = ei.user_id
+    JOIN group_members gm ON gm.user_id = ei.user_id AND gm.group_id = ?
+    WHERE ei.event_id = ? AND ei.status = 'waitlisted' AND u.account_status = 'approved'
+    ORDER BY ei.waitlisted_at, ei.user_id
+  `).all(event.groupId, eventId);
+  const next = candidates.find((candidate) => !eventConflicts(candidate.userId, event.groupId, event.startsAtUtc, event.endsAtUtc, eventId).length);
   if (!next) return null;
-  db.prepare("UPDATE event_invites SET status = 'accepted' WHERE event_id = ? AND user_id = ?")
-    .run(eventId, next.userId);
+  setInviteStatus(eventId, next.userId, "accepted");
   return next.userId;
 }
 
@@ -1095,6 +1109,7 @@ function mergeAvailabilitySegments(items) {
 
 function calendarAvailabilityForUser(userId, startDate, endDate, groupId) {
   const availability = expandAvailability(startDate, endDate, groupId);
+  const timezone = db.prepare("SELECT timezone FROM groups WHERE id = ?").get(groupId)?.timezone || "Europe/London";
   const committedByUser = new Map();
 
   function commit(user, event) {
@@ -1106,10 +1121,12 @@ function calendarAvailabilityForUser(userId, startDate, endDate, groupId) {
     });
   }
 
-  for (const event of eventRows("", [], groupId).filter((item) => item.date >= startDate && item.date <= endDate)) {
-    commit(event.ownerId, event);
-    for (const invite of event.invites) {
-      if (["accepted", "tentative"].includes(invite.status)) commit(invite.userId, event);
+  for (const event of eventRows("", [], groupId)) {
+    for (const segment of localSegments(event.startsAtUtc, event.endsAtUtc, timezone, startDate, endDate)) {
+      commit(event.ownerId, segment);
+      for (const invite of event.invites) {
+        if (["accepted", "tentative"].includes(invite.status)) commit(invite.userId, segment);
+      }
     }
   }
 
@@ -1183,7 +1200,10 @@ function calendarAvailabilityForUser(userId, startDate, endDate, groupId) {
     }
   }
 
-  return feedItems.sort((a, b) => (
+  return feedItems.flatMap(item => {
+    const range = utcEventRange(item.date, item.startTime, item.endTime, timezone);
+    return range ? [{ ...item, ...range }] : [];
+  }).sort((a, b) => (
     `${a.date} ${a.startTime} ${a.kind}`.localeCompare(`${b.date} ${b.startTime} ${b.kind}`)
   ));
 }
@@ -1216,10 +1236,18 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 app.get("/api/setup", (_req, res) => {
   const userCount = db.prepare("SELECT COUNT(*) AS count FROM users").get().count;
-  res.json({ hasUsers: userCount > 0 });
+  res.json({ hasUsers: userCount > 0, registrationMode: registrationMode() });
 });
 
+function registrationMode() {
+  return getSetting("registrationMode", "approval") === "closed" ? "closed" : "approval";
+}
+
 app.post("/api/auth/register", authRateLimit, (req, res) => {
+  const hasUsers = db.prepare("SELECT 1 FROM users LIMIT 1").get();
+  if (hasUsers && registrationMode() === "closed") {
+    return res.status(403).json({ error: "Registration is closed. Contact your administrator." });
+  }
   const username = cleanText(req.body.username).toLowerCase();
   const displayName = cleanText(req.body.displayName, username);
   const password = String(req.body.password ?? "");
@@ -1228,7 +1256,7 @@ app.post("/api/auth/register", authRateLimit, (req, res) => {
     return res.status(400).json({ error: "Username must be 3-24 characters using letters, numbers, dots, dashes, or underscores." });
   }
   if (displayName.length < 1 || displayName.length > 60) return res.status(400).json({ error: "Display name must be 1-60 characters." });
-  if (password.length < 8 || password.length > 128) return res.status(400).json({ error: "Password must be 8-128 characters." });
+  if (!validNewPassword(password)) return res.status(400).json({ error: "Password must be at least 8 characters and at most 72 UTF-8 bytes." });
 
   const passwordHash = bcrypt.hashSync(password, 12);
 
@@ -1238,8 +1266,9 @@ app.post("/api/auth/register", authRateLimit, (req, res) => {
       const userCount = db.prepare("SELECT COUNT(*) AS count FROM users").get().count;
       const role = userCount === 0 ? "admin" : "user";
       const inserted = db
-        .prepare("INSERT INTO users (username, display_name, role, password_hash, accent) VALUES (?, ?, ?, ?, '#6bc9ed')")
-        .run(username, displayName, role, passwordHash);
+        .prepare("INSERT INTO users (username, display_name, role, password_hash, accent, account_status) VALUES (?, ?, ?, ?, '#6bc9ed', ?)")
+        .run(username, displayName, role, passwordHash, userCount === 0 ? "approved" : "pending");
+      if (userCount > 0) return inserted;
       const group = db.prepare("SELECT id FROM groups ORDER BY id LIMIT 1").get();
       db.prepare("INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, ?)")
         .run(group.id, inserted.lastInsertRowid, userCount === 0 ? "owner" : "member");
@@ -1255,6 +1284,10 @@ app.post("/api/auth/register", authRateLimit, (req, res) => {
   }
 
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(result.lastInsertRowid);
+  if (user.account_status === "pending") {
+    audit(null, "account.requested", "user", user.id);
+    return res.status(202).json({ pendingApproval: true, message: "Account requested. An administrator must approve it before you can sign in." });
+  }
   setSession(res, user.id, Number(user.session_version || 0));
   res.status(201).json({ user: publicUser(user, true) });
 });
@@ -1266,6 +1299,9 @@ app.post("/api/auth/login", authRateLimit, (req, res) => {
 
   if (password.length > 128 || !user || !bcrypt.compareSync(password, user.password_hash)) {
     return res.status(401).json({ error: "Invalid username or password." });
+  }
+  if (user.account_status !== "approved") {
+    return res.status(403).json({ error: "Your account is awaiting administrator approval.", code: "ACCOUNT_PENDING" });
   }
   setSession(res, user.id, Number(user.session_version || 0));
   res.json({ user: publicUser(user, true) });
@@ -1341,15 +1377,15 @@ app.post("/api/groups/:id/invite-code", requireAuth, requireGroupOwner, (req, re
   res.json({ ok: true, inviteCode });
 });
 
-app.put("/api/me/password", requireAuth, (req, res) => {
+app.put("/api/me/password", requireAuth, authRateLimit, (req, res) => {
   const currentPassword = String(req.body.currentPassword ?? "");
   const newPassword = String(req.body.newPassword ?? "");
 
   if (currentPassword.length > 128 || !bcrypt.compareSync(currentPassword, req.user.password_hash)) {
     return res.status(401).json({ error: "Current password is incorrect." });
   }
-  if (newPassword.length < 8 || newPassword.length > 128) {
-    return res.status(400).json({ error: "New password must be 8-128 characters." });
+  if (!validNewPassword(newPassword)) {
+    return res.status(400).json({ error: "New password must be at least 8 characters and at most 72 UTF-8 bytes." });
   }
   if (bcrypt.compareSync(newPassword, req.user.password_hash)) {
     return res.status(400).json({ error: "New password must be different from the temporary password." });
@@ -1403,6 +1439,9 @@ app.put("/api/profile", requireAuth, (req, res) => {
   if (!isHexColor(profileColor) || !isHexColor(accent)) return res.status(400).json({ error: "Profile and accent colours must be hex colours." });
   if (!["dark", "light", "system"].includes(theme)) return res.status(400).json({ error: "Theme is invalid." });
   if (discordUserId && !/^\d{15,22}$/.test(discordUserId)) return res.status(400).json({ error: "Discord user ID is invalid." });
+  if (discordUserId && db.prepare("SELECT 1 FROM users WHERE discord_user_id = ? AND id != ?").get(discordUserId, req.user.id)) {
+    return res.status(409).json({ error: "That Discord user ID is already linked to another account." });
+  }
 
   db.prepare(`
     UPDATE users
@@ -1466,7 +1505,7 @@ app.delete("/api/calendar/subscription", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/games", requireAuth, async (req, res) => {
+app.get("/api/games", requireAuth, asyncRoute(async (req, res) => {
   const query = cleanText(req.query.q, "co-op").slice(0, 80);
   try {
     const games = await searchSteamGames(query);
@@ -1474,9 +1513,9 @@ app.get("/api/games", requireAuth, async (req, res) => {
   } catch (error) {
     res.status(502).json({ error: error.message });
   }
-});
+}));
 
-app.get("/api/games/:appId", requireAuth, async (req, res) => {
+app.get("/api/games/:appId", requireAuth, asyncRoute(async (req, res) => {
   try {
     const game = await getSteamGameDetails(req.params.appId);
     if (!game) return res.status(404).json({ error: "Game not found on Steam." });
@@ -1484,9 +1523,9 @@ app.get("/api/games/:appId", requireAuth, async (req, res) => {
   } catch (error) {
     res.status(502).json({ error: error.message });
   }
-});
+}));
 
-app.post("/api/games/suggest", requireAuth, async (req, res) => {
+app.post("/api/games/suggest", requireAuth, asyncRoute(async (req, res) => {
   const steamAppId = Number(req.body.steamAppId);
   const title = cleanText(req.body.title);
   const imageUrl = cleanText(req.body.image);
@@ -1510,17 +1549,21 @@ app.post("/api/games/suggest", requireAuth, async (req, res) => {
   } catch (error) {
     res.status(502).json({ error: error.message });
   }
-});
+}));
 
 app.get("/api/availability", requireAuth, (req, res) => {
-  const start = isDateString(req.query.start) ? req.query.start : addDateDays(dateString(new Date()), -14);
-  const end = isDateString(req.query.end) ? req.query.end : addDateDays(start, 120);
+  let start, end;
+  try { ({ start, end } = dateRange(req.query, addDateDays(DateTime.now().setZone(req.group.timezone).toISODate(), -14), 120)); }
+  catch (error) { return res.status(400).json({ error: error.message }); }
   res.json({ availability: expandAvailability(start, end, req.groupId) });
 });
 
+addAvailabilityEditingRoutes(app, requireAuth);
+
 app.get("/api/availability/best-times", requireAuth, (req, res) => {
-  const start = isDateString(req.query.start) ? req.query.start : dateString(new Date());
-  const end = isDateString(req.query.end) ? req.query.end : addDateDays(start, 6);
+  let start, end;
+  try { ({ start, end } = dateRange(req.query, DateTime.now().setZone(req.group.timezone).toISODate(), 6)); }
+  catch (error) { return res.status(400).json({ error: error.message }); }
   res.json({ slots: findBestSlots(start, end, null, req.groupId) });
 });
 
@@ -1538,7 +1581,18 @@ app.get("/api/availability/recurring", requireAuth, (req, res) => {
       ORDER BY r.weekday, r.start_time
     `)
     .all(...params);
-  res.json({ rules });
+  const exceptions = db.prepare("SELECT date FROM availability_exceptions WHERE rule_id = ?");
+  res.json({ rules: rules.map(rule => {
+    const skipped = new Set(exceptions.all(rule.id).map(item => item.date));
+    const now = DateTime.now().setZone(req.group.timezone);
+    const today = now.toISODate();
+    let nextDate = rule.startDate > today ? rule.startDate : today;
+    nextDate = addDateDays(nextDate, (rule.weekday - new Date(`${nextDate}T12:00:00Z`).getUTCDay() + 7) % 7);
+    if (nextDate === today && rule.endTime <= now.toFormat("HH:mm")) nextDate = addDateDays(nextDate, 7);
+    let attempts = 0;
+    while ((skipped.has(nextDate) || !utcEventRange(nextDate, rule.startTime, rule.endTime, req.group.timezone)) && attempts++ < skipped.size + 4) nextDate = addDateDays(nextDate, 7);
+    return { ...rule, nextDate: (rule.endDate && nextDate > rule.endDate) || !utcEventRange(nextDate, rule.startTime, rule.endTime, req.group.timezone) || skipped.has(nextDate) ? null : nextDate };
+  }) });
 });
 
 app.post("/api/availability/recurring", requireAuth, (req, res) => {
@@ -1549,7 +1603,7 @@ app.post("/api/availability/recurring", requireAuth, (req, res) => {
   const startTime = cleanText(req.body.startTime);
   const endTime = cleanText(req.body.endTime);
   const note = cleanText(req.body.note).slice(0, 200);
-  const startDate = cleanText(req.body.startDate, dateString(new Date()));
+  const startDate = cleanText(req.body.startDate, DateTime.now().setZone(req.group.timezone).toISODate());
   const endDate = cleanText(req.body.endDate) || null;
   if (
     weekdays.length === 0
@@ -1610,7 +1664,7 @@ app.delete("/api/availability/presets/:id", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/availability", requireAuth, async (req, res) => {
+app.post("/api/availability", requireAuth, asyncRoute(async (req, res) => {
   const date = cleanText(req.body.date);
   const startTime = cleanText(req.body.startTime);
   const endTime = cleanText(req.body.endTime);
@@ -1618,6 +1672,7 @@ app.post("/api/availability", requireAuth, async (req, res) => {
   if (!date || !startTime || !endTime) return res.status(400).json({ error: "Date, start, and end time are required." });
   if (!isDateString(date) || !isTimeString(startTime) || !isTimeString(endTime)) return res.status(400).json({ error: "Invalid date or time." });
   if (startTime >= endTime) return res.status(400).json({ error: "End time must be after start time." });
+  if (!utcEventRange(date, startTime, endTime, req.group.timezone)) return res.status(400).json({ error: timeValidationMessage });
 
   const result = db
     .prepare("INSERT INTO availability (group_id, user_id, date, start_time, end_time, note, timezone) VALUES (?, ?, ?, ?, ?, ?, ?)")
@@ -1635,16 +1690,16 @@ app.post("/api/availability", requireAuth, async (req, res) => {
     ]
   });
   res.status(201).json({ id: result.lastInsertRowid, discord });
-});
+}));
 
-app.delete("/api/availability/:id", requireAuth, async (req, res) => {
+app.delete("/api/availability/:id", requireAuth, asyncRoute(async (req, res) => {
   const recurringMatch = /^rule-(\d+)-(\d{4}-\d{2}-\d{2})$/.exec(req.params.id);
   if (recurringMatch) {
     const ruleId = Number(recurringMatch[1]);
     const date = recurringMatch[2];
     const rule = db
       .prepare(`
-        SELECT r.user_id AS userId, u.display_name AS displayName, r.start_time AS startTime,
+        SELECT r.*, r.user_id AS userId, u.display_name AS displayName, r.start_time AS startTime,
                r.end_time AS endTime
         FROM availability_rules r
         JOIN users u ON u.id = r.user_id
@@ -1655,6 +1710,7 @@ app.delete("/api/availability/:id", requireAuth, async (req, res) => {
     if (rule.userId !== req.user.id && req.user.role !== "admin") {
       return res.status(403).json({ error: "Only the owner or an admin can skip this recurring entry." });
     }
+    if (!matchesRuleDate(rule, date)) return res.status(400).json({ error: "That date is not part of this repeating schedule." });
     db.prepare("INSERT OR IGNORE INTO availability_exceptions (rule_id, date) VALUES (?, ?)").run(ruleId, date);
     return res.json({ ok: true, exception: true });
   }
@@ -1689,12 +1745,12 @@ app.delete("/api/availability/:id", requireAuth, async (req, res) => {
     color: 0x7c8790
   });
   res.json({ ok: true, discord });
-});
+}));
 
 app.get("/api/events", requireAuth, (req, res) => {
   const nowKey = currentDateTimeKey();
   const events = eventRows("", [], req.groupId).filter((event) => isUpcomingEvent(event, nowKey));
-  res.json({ events: eventsForTimezone(events, req.user.timezone) });
+  res.json({ events: eventsForTimezone(events, req.group.timezone) });
 });
 
 app.get("/api/events/history", requireAuth, (req, res) => {
@@ -1707,10 +1763,10 @@ app.get("/api/events/history", requireAuth, (req, res) => {
     ))
     .sort((a, b) => String(b.endsAtUtc || b.date).localeCompare(String(a.endsAtUtc || a.date)))
     .slice(0, 200);
-  res.json({ events: eventsForTimezone(history, req.user.timezone) });
+  res.json({ events: eventsForTimezone(history, req.group.timezone) });
 });
 
-app.patch("/api/events/:id/invites/me", requireAuth, async (req, res) => {
+app.patch("/api/events/:id/invites/me", requireAuth, asyncRoute(async (req, res) => {
   const eventId = Number(req.params.id);
   let status = cleanText(req.body.status);
   if (!["accepted", "declined", "tentative"].includes(status)) {
@@ -1719,6 +1775,7 @@ app.patch("/api/events/:id/invites/me", requireAuth, async (req, res) => {
 
   const activeEvent = eventInActiveGroup(eventId, req.groupId);
   if (!activeEvent) return res.status(404).json({ error: "Event not found." });
+  if (new Date(activeEvent.endsAtUtc).getTime() <= Date.now()) return res.status(409).json({ error: "This event has ended." });
   const invite = db.prepare("SELECT event_id AS eventId, status FROM event_invites WHERE event_id = ? AND user_id = ?")
     .get(eventId, req.user.id);
   if (!invite) return res.status(404).json({ error: "Invite not found." });
@@ -1735,21 +1792,22 @@ app.patch("/api/events/:id/invites/me", requireAuth, async (req, res) => {
       return res.status(409).json({
         error: "This overlaps another event you have accepted.",
         code: "EVENT_CONFLICT",
-        conflicts: eventsForTimezone(conflicts, req.user.timezone)
+        conflicts: eventsForTimezone(conflicts, req.group.timezone)
       });
     }
+    while (promoteWaitlist(eventId)) { /* Preserve queue priority when a vacancy exists. */ }
     const capacity = db.prepare(`
       SELECT e.max_players AS maxPlayers,
-             SUM(CASE WHEN ei.status = 'accepted' THEN 1 ELSE 0 END) AS accepted
+             SUM(CASE WHEN ei.status = 'accepted' AND ei.user_id != ? THEN 1 ELSE 0 END) AS accepted
       FROM events e
       LEFT JOIN event_invites ei ON ei.event_id = e.id
       WHERE e.id = ?
       GROUP BY e.id
-    `).get(eventId);
+    `).get(req.user.id, eventId);
     if (capacity && capacity.accepted >= capacity.maxPlayers) status = "waitlisted";
   }
 
-  db.prepare("UPDATE event_invites SET status = ? WHERE event_id = ? AND user_id = ?").run(status, eventId, req.user.id);
+  setInviteStatus(eventId, req.user.id, status);
   db.prepare("UPDATE events SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(eventId);
   const promotedUserId = invite.status === "accepted" && status !== "accepted" ? promoteWaitlist(eventId) : null;
   const event = db
@@ -1779,12 +1837,12 @@ app.patch("/api/events/:id/invites/me", requireAuth, async (req, res) => {
     ],
     color: status === "accepted" ? 0x2fd3ba : status === "tentative" ? 0xd7fb6d : 0x7c8790
   });
-  if (status === "accepted") await announceReadyIfNeeded(eventId);
+  if (status === "accepted" || promotedUserId) await announceReadyIfNeeded(eventId);
   audit(req.user.id, `event.rsvp.${status}`, "event", eventId, {}, req.groupId);
   res.status(status === "waitlisted" ? 202 : 200).json({ ok: true, status, promotedUserId, discord });
-});
+}));
 
-app.delete("/api/events/:id/invites/me", requireAuth, async (req, res) => {
+app.delete("/api/events/:id/invites/me", requireAuth, asyncRoute(async (req, res) => {
   const eventId = Number(req.params.id);
   const invite = db
     .prepare(`
@@ -1821,6 +1879,7 @@ app.delete("/api/events/:id/invites/me", requireAuth, async (req, res) => {
     `).run(eventId, eventId);
   })();
   const promotedUserId = promoteWaitlist(eventId);
+  if (promotedUserId) await announceReadyIfNeeded(eventId);
 
   const discord = await notifyDiscord("inviteResponse", {
     actor: req.user.display_name,
@@ -1841,7 +1900,7 @@ app.delete("/api/events/:id/invites/me", requireAuth, async (req, res) => {
   });
   audit(req.user.id, "event.left", "event", eventId, { promotedUserId }, req.groupId);
   res.json({ ok: true, promotedUserId, discord });
-});
+}));
 
 app.patch("/api/events/:id", requireAuth, (req, res) => {
   const eventId = Number(req.params.id);
@@ -1855,15 +1914,18 @@ app.patch("/api/events/:id", requireAuth, (req, res) => {
   if (!isDateString(date) || !isTimeString(startTime) || !isTimeString(endTime) || startTime >= endTime) {
     return res.status(400).json({ error: "Event date or time is invalid." });
   }
-  const range = utcEventRange(date, startTime, endTime, event.timezone || req.group.timezone);
-  if (!range) return res.status(400).json({ error: "Event date or time is invalid in the squad timezone." });
+  const range = utcEventRange(date, startTime, endTime, req.group.timezone);
+  if (!range) return res.status(400).json({ error: timeValidationMessage });
+  const attending = db.prepare("SELECT user_id AS id FROM event_invites WHERE event_id = ? AND status IN ('accepted', 'tentative')").all(eventId);
+  const conflictingUserIds = schedulingConflicts([event.ownerId, ...attending.map(item => item.id)], range, eventId);
+  if (conflictingUserIds.length && req.body.force !== true) return res.status(409).json({ error: "This time conflicts with another commitment for the host or attending players. Choose another slot.", code: "EVENT_CONFLICT", conflictingUserIds });
   db.prepare(`
     UPDATE events
     SET date = ?, start_time = ?, end_time = ?, starts_at_utc = ?, ends_at_utc = ?,
-        ready_announced = 0, updated_at = CURRENT_TIMESTAMP
+        timezone = ?, ready_announced = 0, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `)
-    .run(date, startTime, endTime, range.startsAtUtc, range.endsAtUtc, eventId);
+    .run(date, startTime, endTime, range.startsAtUtc, range.endsAtUtc, req.group.timezone, eventId);
   audit(req.user.id, "event.rescheduled", "event", eventId, { date, startTime, endTime }, req.groupId);
   res.json({ ok: true });
 });
@@ -1962,7 +2024,7 @@ app.get("/api/events/:id/ics", requireAuth, (req, res) => {
 
 app.get("/api/calendar.ics", requireAuth, (req, res) => {
   const events = calendarEventsForUser(req.user.id, req.groupId);
-  const today = dateString(new Date());
+  const today = DateTime.now().setZone(req.group.timezone).toISODate();
   const availability = calendarAvailabilityForUser(req.user.id, addDateDays(today, -7), addDateDays(today, 120), req.groupId);
   res.setHeader("Content-Type", "text/calendar; charset=utf-8");
   res.setHeader("Content-Disposition", 'attachment; filename="squadslot-calendar.ics"');
@@ -1974,10 +2036,11 @@ app.get("/calendar/:token.ics", (req, res) => {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return res.status(404).send("Calendar subscription not found.");
 
   const subscription = db.prepare(`
-    SELECT cs.user_id AS userId, u.display_name AS displayName, u.active_group_id AS groupId
+    SELECT cs.user_id AS userId, u.display_name AS displayName, u.active_group_id AS groupId, g.timezone
     FROM calendar_subscriptions cs
     JOIN users u ON u.id = cs.user_id
-    WHERE cs.token_hash = ?
+    JOIN groups g ON g.id = u.active_group_id
+    WHERE cs.token_hash = ? AND u.account_status = 'approved'
   `).get(calendarTokenHash(token));
   if (!subscription) return res.status(404).send("Calendar subscription not found.");
 
@@ -1985,7 +2048,7 @@ app.get("/calendar/:token.ics", (req, res) => {
     .run(subscription.userId);
   const sourceUrl = calendarSubscriptionUrls(req, token).httpsUrl;
   const events = calendarEventsForUser(subscription.userId, subscription.groupId);
-  const today = dateString(new Date());
+  const today = DateTime.now().setZone(subscription.timezone).toISODate();
   const availability = calendarAvailabilityForUser(
     subscription.userId,
     addDateDays(today, -7),
@@ -1999,7 +2062,7 @@ app.get("/calendar/:token.ics", (req, res) => {
   res.send(eventsToIcs(events, `${subscription.displayName} - SquadSlot`, { sourceUrl, availability }));
 });
 
-app.delete("/api/events/:id", requireAuth, async (req, res) => {
+app.delete("/api/events/:id", requireAuth, asyncRoute(async (req, res) => {
   const eventId = Number(req.params.id);
   const event = db
     .prepare(`
@@ -2032,9 +2095,9 @@ app.delete("/api/events/:id", requireAuth, async (req, res) => {
     color: 0x7c8790
   });
   res.json({ ok: true, discord });
-});
+}));
 
-app.post("/api/events", requireAuth, async (req, res) => {
+app.post("/api/events", requireAuth, asyncRoute(async (req, res) => {
   const title = cleanText(req.body.title);
   const date = cleanText(req.body.date);
   const startTime = cleanText(req.body.startTime);
@@ -2046,6 +2109,10 @@ app.post("/api/events", requireAuth, async (req, res) => {
   const minPlayers = Number(req.body.minPlayers || 2);
   const maxPlayers = Number(req.body.maxPlayers || Math.max(4, minPlayers));
   const rsvpDeadlineInput = cleanText(req.body.rsvpDeadline) || null;
+  if (Array.isArray(req.body.gameOptions) && req.body.gameOptions.some((option) => !option || typeof option !== "object")) {
+    return res.status(400).json({ error: "Game options must be objects." });
+  }
+  if (inviteIds.length > 100) return res.status(400).json({ error: "Invite at most 100 players per event." });
   const gameOptions = Array.isArray(req.body.gameOptions)
     ? req.body.gameOptions
       .map((option) => ({
@@ -2064,12 +2131,13 @@ app.post("/api/events", requireAuth, async (req, res) => {
   if (!Number.isInteger(minPlayers) || !Number.isInteger(maxPlayers) || minPlayers < 1 || maxPlayers < minPlayers || maxPlayers > 100) {
     return res.status(400).json({ error: "Player capacity is invalid." });
   }
-  const rsvpDateTime = rsvpDeadlineInput ? DateTime.fromISO(rsvpDeadlineInput, { zone: req.group.timezone }) : null;
-  if (rsvpDateTime && !rsvpDateTime.isValid) return res.status(400).json({ error: "RSVP deadline is invalid." });
+  const rsvpDateTime = rsvpDeadlineInput ? localInstant(rsvpDeadlineInput.slice(0, 10), rsvpDeadlineInput.slice(11, 16), req.group.timezone) : null;
+  if (rsvpDeadlineInput && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(rsvpDeadlineInput) || !rsvpDateTime)) return res.status(400).json({ error: timeValidationMessage });
   const rsvpDeadline = rsvpDateTime ? rsvpDateTime.toUTC().toISO() : null;
 
   const range = utcEventRange(date, startTime, endTime, req.group.timezone);
-  if (!range) return res.status(400).json({ error: "Event date or time is invalid in the squad timezone." });
+  if (!range) return res.status(400).json({ error: timeValidationMessage });
+  if (schedulingConflicts([req.user.id], range).length && req.body.force !== true) return res.status(409).json({ error: "You already have a commitment during this time, possibly in another squad. Choose another slot.", code: "EVENT_CONFLICT" });
   const validInviteIds = inviteIds.length
     ? db.prepare(`
       SELECT user_id AS userId FROM group_members
@@ -2165,10 +2233,10 @@ app.post("/api/events", requireAuth, async (req, res) => {
   audit(req.user.id, "event.created", "event", eventId, { title, inviteCount: validInviteIds.length }, req.groupId);
 
   res.status(201).json({ id: eventId, discord });
-});
+}));
 
 app.get("/api/proposals", requireAuth, (req, res) => {
-  res.json({ proposals: proposalRows(req.groupId, req.user.timezone) });
+  res.json({ proposals: proposalRows(req.groupId, req.group.timezone) });
 });
 
 app.post("/api/proposals", requireAuth, (req, res) => {
@@ -2177,6 +2245,7 @@ app.post("/api/proposals", requireAuth, (req, res) => {
   const slots = Array.isArray(req.body.slots) ? req.body.slots.slice(0, 12) : [];
   const games = Array.isArray(req.body.games) ? req.body.games.slice(0, 12) : [];
   const inviteIds = Array.isArray(req.body.inviteIds) ? [...new Set(req.body.inviteIds.map(Number).filter(Boolean))] : [];
+  if (inviteIds.length > 100) return res.status(400).json({ error: "A proposal can invite at most 100 players." });
   if (!title || slots.length < 1) return res.status(400).json({ error: "A title and at least one time option are required." });
 
   const parsedSlots = slots.map((slot) => {
@@ -2223,6 +2292,9 @@ app.put("/api/proposals/:id/vote", requireAuth, (req, res) => {
     .get(proposalId, req.groupId);
   if (!proposal) return res.status(404).json({ error: "Proposal not found." });
   if (proposal.status !== "open") return res.status(409).json({ error: "This proposal is already closed." });
+  if (!db.prepare("SELECT 1 FROM proposal_invites WHERE proposal_id = ? AND user_id = ?").get(proposalId, req.user.id)) {
+    return res.status(403).json({ error: "Only invited players can vote on this proposal." });
+  }
   const slotId = req.body.slotId ? Number(req.body.slotId) : null;
   const gameId = req.body.gameId ? Number(req.body.gameId) : null;
   if (slotId && !db.prepare("SELECT 1 FROM proposal_slots WHERE id = ? AND proposal_id = ?").get(slotId, proposalId)) {
@@ -2268,6 +2340,8 @@ app.post("/api/proposals/:id/finalize", requireAuth, (req, res) => {
   };
   const slot = chooseTop(slots);
   const game = chooseTop(games);
+  if (!slot) return res.status(400).json({ error: "Proposal has no valid slots." });
+  if (schedulingConflicts([proposal.ownerId], { startsAtUtc: slot.starts_at_utc, endsAtUtc: slot.ends_at_utc }).length && req.body.force !== true) return res.status(409).json({ error: "The host already has a commitment during the winning slot. Choose another time.", code: "EVENT_CONFLICT" });
   const localStart = DateTime.fromISO(slot.starts_at_utc, { zone: "utc" }).setZone(req.group.timezone);
   const localEnd = DateTime.fromISO(slot.ends_at_utc, { zone: "utc" }).setZone(req.group.timezone);
   const inviteIds = db.prepare("SELECT user_id AS userId FROM proposal_invites WHERE proposal_id = ?").all(proposalId).map((row) => row.userId);
@@ -2321,7 +2395,7 @@ app.get("/api/dashboard", requireAuth, (req, res) => {
   const today = DateTime.now().setZone(req.group.timezone).toISODate();
   const weekEnd = addDateDays(today, 6);
   const rawEvents = eventRows("", [], req.groupId).filter((event) => isUpcomingEvent(event, nowKey));
-  const events = eventsForTimezone(rawEvents, req.user.timezone);
+  const events = eventsForTimezone(rawEvents, req.group.timezone);
   const myEvents = events.filter((event) => (
     event.ownerId === req.user.id
     || event.invites.some((invite) => invite.userId === req.user.id && ["accepted", "tentative"].includes(invite.status))
@@ -2362,7 +2436,7 @@ app.get("/api/admin/users", requireAdmin, (_req, res) => {
   const users = db
     .prepare(`
       SELECT u.id, u.username, u.display_name AS displayName, u.role, u.created_at AS createdAt,
-             u.must_change_password AS mustChangePassword,
+             u.must_change_password AS mustChangePassword, u.account_status AS accountStatus,
              COUNT(DISTINCT a.id) AS availabilityCount,
              COUNT(DISTINCT e.id) AS eventCount
       FROM users u
@@ -2379,6 +2453,9 @@ app.patch("/api/admin/users/:id", requireAdmin, (req, res) => {
   const userId = Number(req.params.id);
   const role = cleanText(req.body.role);
   if (!["admin", "user"].includes(role)) return res.status(400).json({ error: "Invalid role." });
+  const account = db.prepare("SELECT account_status FROM users WHERE id = ?").get(userId);
+  if (!account) return res.status(404).json({ error: "Account not found." });
+  if (account.account_status !== "approved") return res.status(409).json({ error: "Approve this account before changing its role." });
 
   const adminCount = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'").get().count;
   if (req.user.id === userId && role !== "admin" && adminCount <= 1) {
@@ -2387,6 +2464,34 @@ app.patch("/api/admin/users/:id", requireAdmin, (req, res) => {
 
   db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, userId);
   audit(req.user.id, "account.role_changed", "user", userId, { role });
+  res.json({ ok: true });
+});
+
+app.put("/api/admin/registration", requireAdmin, (req, res) => {
+  const mode = req.body.registrationMode;
+  if (!["approval", "closed"].includes(mode)) return res.status(400).json({ error: "Choose administrator approval or closed registration." });
+  setSetting("registrationMode", mode);
+  audit(req.user.id, "settings.registration_updated", "settings", "registration", { mode });
+  res.json({ registrationMode: mode });
+});
+
+app.post("/api/admin/users/:id/approval", requireAdmin, (req, res) => {
+  const userId = Number(req.params.id);
+  const decision = req.body.decision;
+  if (!["approve", "reject"].includes(decision)) return res.status(400).json({ error: "Invalid approval decision." });
+  const account = db.prepare("SELECT id, account_status FROM users WHERE id = ?").get(userId);
+  if (!account) return res.status(404).json({ error: "Account not found." });
+  if (account.account_status !== "pending") return res.status(409).json({ error: "This account is not awaiting approval." });
+  db.transaction(() => {
+    if (decision === "reject") {
+      db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+    } else {
+      const group = db.prepare("SELECT id FROM groups ORDER BY id LIMIT 1").get();
+      db.prepare("UPDATE users SET account_status = 'approved', active_group_id = ?, session_version = session_version + 1 WHERE id = ?").run(group.id, userId);
+      db.prepare("INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, 'member')").run(group.id, userId);
+    }
+    audit(req.user.id, `account.${decision === "approve" ? "approved" : "rejected"}`, "user", userId);
+  })();
   res.json({ ok: true });
 });
 
@@ -2399,8 +2504,8 @@ app.put("/api/admin/users/:id/password", requireAdmin, (req, res) => {
   if (userId === req.user.id) {
     return res.status(400).json({ error: "The signed-in admin password cannot be reset from account management." });
   }
-  if (temporaryPassword.length < 8 || temporaryPassword.length > 128) {
-    return res.status(400).json({ error: "Temporary password must be 8-128 characters." });
+  if (!validNewPassword(temporaryPassword)) {
+    return res.status(400).json({ error: "Temporary password must be at least 8 characters and at most 72 UTF-8 bytes." });
   }
 
   const passwordHash = bcrypt.hashSync(temporaryPassword, 12);
@@ -2418,6 +2523,7 @@ app.get("/api/admin/settings", requireAdmin, (_req, res) => {
   const appUrl = getSetting("appUrl", process.env.APP_URL || "http://localhost:8080");
   res.json({
     settings: {
+      registrationMode: registrationMode(),
       appUrl,
       discordWebhookUrl: getSetting("discordWebhookUrl", process.env.DISCORD_WEBHOOK_URL || ""),
       discordBotName: getSetting("discordBotName", process.env.DISCORD_BOT_NAME || "SquadSlot"),
@@ -2460,7 +2566,7 @@ app.put("/api/admin/settings", requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/admin/discord/test", requireAdmin, async (req, res) => {
+app.post("/api/admin/discord/test", requireAdmin, asyncRoute(async (req, res) => {
   let discord;
   try {
     discord = await postDiscordUpdate({
@@ -2480,7 +2586,7 @@ app.post("/api/admin/discord/test", requireAdmin, async (req, res) => {
   if (discord.skipped) return res.status(400).json({ error: "Discord webhook is not configured." });
 
   res.json({ ok: true, discord });
-});
+}));
 
 app.get("/api/admin/notifications", requireAdmin, (_req, res) => {
   res.json({ notifications: getNotificationSettings() });
@@ -2510,24 +2616,31 @@ app.put("/api/admin/reminders", requireAdmin, (req, res) => {
   }
 });
 
-app.post("/api/admin/reminders/run", requireAdmin, async (_req, res) => {
+app.post("/api/admin/reminders/run", requireAdmin, asyncRoute(async (_req, res) => {
   await runReminderSweep(notifyDiscord);
   res.json({ ok: true });
-});
+}));
 
-app.get("/api/admin/backup", requireAdmin, (_req, res) => {
-  const backup = backupPayload();
-
-  res.setHeader("Content-Type", "application/json");
-  res.setHeader("Content-Disposition", `attachment; filename="squadslot-backup-${backup.exportedAt.slice(0, 10)}.json"`);
-  res.json(backup);
+app.get("/api/admin/backup", requireAdmin, (req, res) => {
+  try {
+    const backup = backupPayload();
+    const encrypted = encryptBackup(backup);
+    audit(req.user.id, "backup.exported", "backup", "download", { encrypted: true });
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", `attachment; filename="squadslot-backup-${backup.exportedAt.slice(0, 10)}.json.enc"`);
+    res.send(encrypted);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
 app.post("/api/admin/backup/restore", requireAdmin, (req, res) => {
   try {
-    const tables = validateBackup(req.body);
-    restoreBackupTables(tables);
-    audit(req.user.id, "backup.restored", "backup", "upload", {});
+    const options = restoreOptions(req.body);
+    const tables = validateBackup(decryptBackup(req.body.backup));
+    restoreBackupTables(tables, options);
+    audit(null, "backup.restored", "backup", "upload", options);
+    clearSession(res);
     res.json({ ok: true });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -2539,7 +2652,7 @@ app.get("/api/admin/backups", requireAdmin, (_req, res) => {
     backups: backupFiles(),
     config: {
       enabled: automaticBackupsEnabled,
-      encrypted: Boolean(process.env.BACKUP_ENCRYPTION_KEY),
+      encrypted: backupEncryptionReady(),
       intervalHours: backupIntervalHours,
       retention: backupRetention
     }
@@ -2566,12 +2679,14 @@ app.get("/api/admin/backups/:name", requireAdmin, (req, res) => {
 
 app.post("/api/admin/backups/:name/restore", requireAdmin, (req, res) => {
   try {
+    const options = restoreOptions(req.body);
     const file = safeBackupPath(req.params.name);
     if (!fs.existsSync(file)) return res.status(404).json({ error: "Backup not found." });
     const payload = decryptBackup(fs.readFileSync(file, "utf8"));
     const tables = validateBackup(payload);
-    restoreBackupTables(tables);
-    audit(req.user.id, "backup.restored", "backup", req.params.name, {});
+    restoreBackupTables(tables, options);
+    audit(null, "backup.restored", "backup", req.params.name, options);
+    clearSession(res);
     res.json({ ok: true });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -2596,13 +2711,16 @@ app.get("/api/admin/audit", requireAdmin, (req, res) => {
   res.json({ entries });
 });
 
+addPushRoutes(app, requireAuth);
+
 app.use("/api", (error, _req, res, next) => {
-  void next;
-  console.error(error);
+  if (res.headersSent) return next(error);
+  if (error.type === "entity.parse.failed") return res.status(400).json({ error: "Invalid JSON." });
+  if (error.type === "entity.too.large") return res.status(413).json({ error: "Request body is too large." });
+  if (error.code === "SQLITE_CONSTRAINT_TRIGGER") return res.status(409).json({ error: error.message });
+  console.error("API request failed:", error.code || error.name);
   res.status(500).json({ error: "Server error." });
 });
-
-addPushRoutes(app, requireAuth);
 
 if (process.env.NODE_ENV === "production") {
   app.use(express.static(distDir));

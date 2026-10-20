@@ -1,0 +1,27 @@
+.compact {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 14px;
+  align-items: end;
+  padding: 18px 0;
+  border: 0;
+  border-block: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+.compact > * { min-width: 0; }
+.compact :global(.availability-form-head), .compact :global(.availability-status) { grid-column: 1 / -1; }
+.compact :global(.availability-form-head) { flex-wrap: wrap; }
+.compact :global(.availability-form-actions) { flex-wrap: wrap; }
+.compact :global(.weekday-picker) { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.compact :is(input, select) { width: 100%; min-width: 0; max-width: 100%; }
+.compact :global(.availability-time-fields), .compact :global(.availability-range) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 400px) { .compact :global(.availability-range) { grid-template-columns: minmax(0, 1fr); } }
+.ruleSummary { display: grid; gap: 5px; min-width: 0; overflow-wrap: anywhere; }
+.ruleSummary small { color: var(--muted-ink); }
+.agendaToolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.agendaToolbar label { display: grid; gap: 6px; min-width: 0; max-width: 100%; }
+.agendaToolbar button { width: 38px; height: 42px; }
+.agendaDay h3 { font-size: .95rem; color: var(--accent-ink); margin: 18px 0 8px; }
+.agendaDay :global(.free-time-row) { min-width: 0; }
+.agendaDay :global(.free-time-row > div) { min-width: 0; overflow-wrap: anywhere; }

@@ -1,6 +1,6 @@
 import { db, getSetting, setSetting } from "./db.js";
-
-const slotHours = ["18:00", "19:00", "20:00", "21:00", "22:00", "23:00"];
+import { DateTime } from "luxon";
+import { localSegments, utcEventRange } from "./time.js";
 
 function dateFromString(value) {
   return new Date(`${value}T00:00:00Z`);
@@ -27,8 +27,9 @@ export function expandAvailability(startDate, endDate, groupId = null) {
     .prepare(`
       SELECT a.id, a.user_id AS userId, u.display_name AS displayName, u.avatar_url AS avatarUrl,
              u.profile_color AS profileColor, a.date, a.start_time AS startTime,
-             a.end_time AS endTime, a.note, a.created_at AS createdAt, 0 AS recurring
+             a.end_time AS endTime, a.note, a.created_at AS createdAt, 0 AS recurring, squad.timezone
       FROM availability a
+      JOIN groups squad ON squad.id = a.group_id
       JOIN users u ON u.id = a.user_id
       WHERE a.date BETWEEN ? AND ?${groupClause}
     `)
@@ -41,8 +42,9 @@ export function expandAvailability(startDate, endDate, groupId = null) {
       SELECT r.id AS ruleId, r.user_id AS userId, u.display_name AS displayName,
              u.avatar_url AS avatarUrl, u.profile_color AS profileColor, r.weekday,
              r.start_time AS startTime, r.end_time AS endTime, r.note,
-             r.start_date AS startDate, r.end_date AS endDate, r.created_at AS createdAt
+             r.start_date AS startDate, r.end_date AS endDate, r.created_at AS createdAt, squad.timezone
       FROM availability_rules r
+      JOIN groups squad ON squad.id = r.group_id
       JOIN users u ON u.id = r.user_id
       WHERE r.start_date <= ? AND (r.end_date IS NULL OR r.end_date = '' OR r.end_date >= ?)${ruleGroupClause}
     `)
@@ -59,6 +61,7 @@ export function expandAvailability(startDate, endDate, groupId = null) {
     for (const rule of rules) {
       if (rule.weekday !== weekday || cursor < rule.startDate || (rule.endDate && cursor > rule.endDate)) continue;
       if (exceptions.has(`${rule.ruleId}:${cursor}`)) continue;
+      if (!utcEventRange(cursor, rule.startTime, rule.endTime, rule.timezone)) continue;
       recurring.push({
         id: `rule-${rule.ruleId}-${cursor}`,
         ruleId: rule.ruleId,
@@ -67,16 +70,18 @@ export function expandAvailability(startDate, endDate, groupId = null) {
         avatarUrl: rule.avatarUrl,
         profileColor: rule.profileColor,
         date: cursor,
+        timezone: rule.timezone,
         startTime: rule.startTime,
         endTime: rule.endTime,
         note: rule.note,
         createdAt: rule.createdAt,
-        recurring: 1
+        recurring: 1,
+        weekday: rule.weekday, startDate: rule.startDate, endDate: rule.endDate
       });
     }
   }
 
-  return [...explicit, ...recurring].sort((a, b) => (
+  return [...explicit, ...recurring].map(item => ({ ...item, ...utcEventRange(item.date, item.startTime, item.endTime, item.timezone) })).sort((a, b) => (
     `${a.date} ${a.startTime} ${a.displayName}`.localeCompare(`${b.date} ${b.startTime} ${b.displayName}`)
   ));
 }
@@ -84,27 +89,37 @@ export function expandAvailability(startDate, endDate, groupId = null) {
 export function findBestSlots(startDate, endDate, availability = null, groupId = null) {
   const expanded = availability || expandAvailability(startDate, endDate, groupId);
   const eventGroupClause = groupId ? " AND e.group_id = ?" : "";
-  const eventParams = groupId ? [startDate, endDate, groupId] : [startDate, endDate];
+  const zone = groupId ? db.prepare("SELECT timezone FROM groups WHERE id = ?").get(groupId)?.timezone || "Europe/London" : "Europe/London";
+  const eventParams = groupId ? [addDateDays(startDate, -2), addDateDays(endDate, 2), groupId] : [addDateDays(startDate, -2), addDateDays(endDate, 2)];
   const events = db
     .prepare(`
-      SELECT e.date, e.start_time AS startTime, e.end_time AS endTime, ei.user_id AS userId
+      SELECT e.date, e.start_time AS startTime, e.end_time AS endTime, ei.user_id AS userId,
+             e.starts_at_utc AS startsAtUtc, e.ends_at_utc AS endsAtUtc
       FROM events e
       JOIN event_invites ei ON ei.event_id = e.id
       WHERE e.date BETWEEN ? AND ? AND ei.status IN ('accepted', 'tentative')${eventGroupClause}
     `)
-    .all(...eventParams);
+    .all(...eventParams).flatMap(event => event.startsAtUtc
+      ? localSegments(event.startsAtUtc, event.endsAtUtc, zone, startDate, endDate).map(segment => ({ ...segment, userId: event.userId }))
+      : [event]);
   const slots = [];
 
   for (let cursor = startDate; cursor <= endDate; cursor = addDateDays(cursor, 1)) {
-    for (const startTime of slotHours) {
+    const dayAvailability = expanded.filter((item) => item.date === cursor);
+    const dayEvents = events.filter((event) => event.date === cursor);
+    const boundaries = [...new Set([...dayAvailability, ...dayEvents].flatMap((item) => [item.startTime, item.endTime]))].sort();
+    let previous = null;
+    for (let index = 0; index < boundaries.length - 1; index += 1) {
+      const startTime = boundaries[index];
+      const endTime = boundaries[index + 1];
       const committed = new Set(
-        events
-          .filter((event) => event.date === cursor && event.startTime <= startTime && event.endTime > startTime)
+        dayEvents
+          .filter((event) => event.startTime < endTime && event.endTime > startTime)
           .map((event) => event.userId)
       );
       const players = new Map();
-      for (const item of expanded) {
-        if (item.date !== cursor || item.startTime > startTime || item.endTime <= startTime || committed.has(item.userId)) continue;
+      for (const item of dayAvailability) {
+        if (item.startTime > startTime || item.endTime < endTime || committed.has(item.userId)) continue;
         players.set(item.userId, {
           id: item.userId,
           displayName: item.displayName,
@@ -113,13 +128,22 @@ export function findBestSlots(startDate, endDate, availability = null, groupId =
         });
       }
       if (players.size > 0) {
-        slots.push({
+        const playerList = [...players.values()].sort((a, b) => a.id - b.id);
+        if (previous && previous.endTime === startTime
+          && previous.players.map((player) => player.id).join(",") === playerList.map((player) => player.id).join(",")) {
+          previous.endTime = endTime;
+          continue;
+        }
+        previous = {
           date: cursor,
           startTime,
-          endTime: startTime === "23:00" ? "23:59" : `${String(Number(startTime.slice(0, 2)) + 1).padStart(2, "0")}:00`,
+          endTime,
           count: players.size,
-          players: [...players.values()]
-        });
+          players: playerList
+        };
+        slots.push(previous);
+      } else {
+        previous = null;
       }
     }
   }
@@ -132,7 +156,7 @@ export function findBestSlots(startDate, endDate, availability = null, groupId =
 function icsEscape(value) {
   return String(value || "")
     .replaceAll("\\", "\\\\")
-    .replaceAll("\n", "\\n")
+    .replace(/\r\n|\r|\n/g, "\\n")
     .replaceAll(",", "\\,")
     .replaceAll(";", "\\;");
 }
@@ -193,8 +217,8 @@ export function eventsToIcs(events, calendarName = "SquadSlot", options = {}) {
       `UID:squadslot-${item.kind}-${availabilityUid(item)}@squadslot`,
       `DTSTAMP:${timestamp}`,
       `LAST-MODIFIED:${timestamp}`,
-      `DTSTART:${icsDateTime(item.date, item.startTime)}`,
-      `DTEND:${icsDateTime(item.date, item.endTime)}`,
+      `DTSTART:${eventIcsDateTime(item, "startsAtUtc", item.startTime)}`,
+      `DTEND:${eventIcsDateTime(item, "endsAtUtc", item.endTime)}`,
       `SUMMARY:${icsEscape(item.summary)}`,
       `DESCRIPTION:${icsEscape(item.description)}`,
       "STATUS:CONFIRMED",
@@ -205,7 +229,20 @@ export function eventsToIcs(events, calendarName = "SquadSlot", options = {}) {
   }
 
   lines.push("END:VCALENDAR");
-  return `${lines.join("\r\n")}\r\n`;
+  // RFC 5545 limits content lines to 75 octets; never split a UTF-8 character.
+  return `${lines.map((line) => {
+    const folded = [];
+    let part = "";
+    let bytes = 0;
+    for (const character of line) {
+      const length = Buffer.byteLength(character, "utf8");
+      if (bytes + length > 75) { folded.push(part); part = " "; bytes = 1; }
+      part += character;
+      bytes += length;
+    }
+    folded.push(part);
+    return folded.join("\r\n");
+  }).join("\r\n")}\r\n`;
 }
 
 export function getReminderSettings() {
@@ -241,19 +278,28 @@ function markReminderSent(key) {
   db.prepare("INSERT OR IGNORE INTO reminder_log (reminder_key) VALUES (?)").run(key);
 }
 
-export async function runReminderSweep(sendNotification, now = new Date()) {
+let reminderSweep = null;
+
+export function runReminderSweep(sendNotification, now = new Date()) {
+  if (!reminderSweep) {
+    reminderSweep = performReminderSweep(sendNotification, now).finally(() => { reminderSweep = null; });
+  }
+  return reminderSweep;
+}
+
+async function performReminderSweep(sendNotification, now) {
   const settings = getReminderSettings();
   const events = db
     .prepare(`
       SELECT e.id, e.title, e.date, e.start_time AS startTime, e.end_time AS endTime,
              e.rsvp_deadline AS rsvpDeadline, COALESCE(e.game_title, g.title) AS gameTitle,
-             e.starts_at_utc AS startsAtUtc, owner.display_name AS ownerName
+             e.starts_at_utc AS startsAtUtc, e.timezone, owner.display_name AS ownerName
       FROM events e
       JOIN users owner ON owner.id = e.owner_id
       LEFT JOIN games g ON g.id = e.game_id
-      WHERE e.date >= ?
+      WHERE e.ends_at_utc > ?
     `)
-    .all(dateString(now));
+    .all(now.toISOString());
 
   async function sendOnce(key, type, variables, options) {
     if (reminderWasSent(key)) return;
@@ -274,7 +320,7 @@ export async function runReminderSweep(sendNotification, now = new Date()) {
     };
     const fields = [
       { name: "Game", value: variables.game, inline: true },
-      { name: "When", value: `${event.date}, ${event.startTime} - ${event.endTime}`, inline: true }
+      { name: "When", value: `${event.date}, ${event.startTime} - ${event.endTime} (${event.timezone})`, inline: true }
     ];
 
     if (settings.eventTomorrow && minutesUntil >= 1380 && minutesUntil <= 1500) {
@@ -292,13 +338,14 @@ export async function runReminderSweep(sendNotification, now = new Date()) {
     }
   }
 
-  const weeklyTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-  if (settings.weeklySummary && now.getDay() === settings.weeklyDay && weeklyTime === settings.weeklyTime) {
-    const start = dateString(now);
+  for (const group of db.prepare("SELECT id, name, timezone FROM groups").all()) {
+    const localNow = DateTime.fromJSDate(now).setZone(group.timezone);
+    if (!settings.weeklySummary || localNow.weekday % 7 !== settings.weeklyDay || localNow.toFormat("HH:mm") !== settings.weeklyTime) continue;
+    const start = localNow.toISODate();
     const end = addDateDays(start, 6);
-    const best = findBestSlots(start, end);
-    const summary = best.slice(0, 3).map((slot) => `${slot.date} ${slot.startTime}: ${slot.count} free`).join("\n") || "No shared free slots logged yet.";
-    await sendOnce(`weeklySummary:${start}`, "weeklySummary", { startDate: start, endDate: end, summary }, {
+    const best = findBestSlots(start, end, null, group.id);
+    const summary = `${group.name} (${group.timezone})\n` + (best.slice(0, 3).map((slot) => `${slot.date} ${slot.startTime}: ${slot.count} free`).join("\n") || "No shared free slots logged yet.");
+    await sendOnce(`weeklySummary:${group.id}:${start}`, "weeklySummary", { startDate: start, endDate: end, summary }, {
       fields: [{ name: "Best slots", value: summary, inline: false }],
       color: 0x2fd3ba
     });

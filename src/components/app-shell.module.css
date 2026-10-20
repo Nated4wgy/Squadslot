@@ -1,0 +1,44 @@
+.shell { display: grid; grid-template-columns: 192px minmax(0, 1fr); grid-template-rows: auto 1fr; min-height: 100vh; }
+.header { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 72px; padding: 16px 28px; border-bottom: 1px solid var(--line); background: var(--page-bg); }
+.brand { display: flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; flex-shrink: 0; }
+.brand img { width: 34px; height: 34px; object-fit: contain; }
+.brand strong { font-size: 1.15rem; font-weight: 650; }
+.account { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.account button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted-ink); background: transparent; border: 0; border-radius: 5px; min-height: 36px; }
+.account button:hover { color: var(--ink); background: var(--surface); }
+.person { font-size: 0.8rem; min-width: 0; }
+.person > span:last-child { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bell, .signOut { width: 36px; position: relative; flex-shrink: 0; }
+.bell > span { position: absolute; top: -3px; right: -4px; min-width: 16px; height: 16px; display: grid; place-items: center; padding: 1px 3px; border-radius: 8px; background: var(--accent); color: #091722; font-size: 0.6rem; font-weight: 700; }
+.sidebar { padding: 28px 14px; border-right: 1px solid var(--line); background: var(--page-bg); min-width: 0; }
+.squad { display: block; font-size: 0.67rem; color: var(--muted-ink); padding: 0 10px 20px; }
+.sidebar nav { display: grid; gap: 5px; }
+.sidebar nav button { display: flex; align-items: center; gap: 10px; min-height: 40px; border: 0; border-radius: 5px; padding: 9px 10px; background: transparent; color: var(--muted-ink); font-size: 0.82rem; text-align: left; }
+.sidebar nav button:hover { background: var(--surface); color: var(--ink); }
+.sidebar nav button[aria-current="page"] { color: var(--accent-ink); background: var(--surface-raised); }
+.sidebar nav small { margin-left: auto; color: var(--accent-ink); }
+.sidebar .sectionStart { margin-top: 16px; }
+.workspace { min-width: 0; position: relative; padding: 30px 32px 40px; max-width: 1640px; width: 100%; margin-inline: auto; }
+@media (max-width: 1000px) {
+  .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto 1fr; }
+  .sidebar { padding: 0 20px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .squad { display: none; }
+  .sidebar nav { display: flex; gap: 4px; overflow-x: auto; padding-block: 8px; scrollbar-width: thin; }
+  .sidebar nav button { flex: 0 0 auto; white-space: nowrap; }
+  .sidebar .sectionStart { margin: 0; }
+  .workspace { padding: 26px 24px 32px; }
+}
+@media (max-width: 600px) {
+  .header { min-height: 64px; padding: 12px 16px; gap: 8px; }
+  .brand { gap: 7px; }
+  .brand img { width: 29px; height: 29px; }
+  .brand strong { font-size: 1rem; }
+  .account { gap: 4px; }
+  .account button { min-height: 40px; }
+  .person > span:last-child { display: none; }
+  .person { padding-inline: 4px; }
+  .sidebar { padding-inline: 12px; }
+  .sidebar nav button { min-height: 42px; padding-inline: 9px; }
+  .workspace { padding: 22px 16px 32px; }
+}
+.schedulingZone { margin: 0 0 12px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }

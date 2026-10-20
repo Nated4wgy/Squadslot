@@ -237,6 +237,10 @@ const userColumns = db.prepare("PRAGMA table_info(users)").all().map((column) =>
 if (!userColumns.includes("role")) {
   db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
 }
+if (!userColumns.includes("account_status")) {
+  // Existing accounts retain access; registration explicitly creates pending accounts.
+  db.exec("ALTER TABLE users ADD COLUMN account_status TEXT NOT NULL DEFAULT 'approved'");
+}
 if (!userColumns.includes("avatar_url")) {
   db.exec("ALTER TABLE users ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''");
 }
@@ -316,6 +320,13 @@ if (!eventColumns.includes("ends_at_utc")) {
   db.exec("ALTER TABLE events ADD COLUMN ends_at_utc TEXT");
 }
 
+const inviteColumns = db.prepare("PRAGMA table_info(event_invites)").all().map(column => column.name);
+if (!inviteColumns.includes("waitlisted_at")) {
+  db.exec("ALTER TABLE event_invites ADD COLUMN waitlisted_at INTEGER");
+  // Old queues have no join timestamps; preserve their previous row order once.
+  db.exec("UPDATE event_invites SET waitlisted_at = rowid WHERE status = 'waitlisted'");
+}
+
 for (const table of ["availability", "availability_rules", "availability_presets", "game_suggestions"]) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name);
   if (!columns.includes("group_id")) db.exec(`ALTER TABLE ${table} ADD COLUMN group_id INTEGER`);
@@ -327,10 +338,10 @@ for (const table of ["availability", "availability_rules"]) {
 }
 
 db.transaction(() => {
-  db.prepare("UPDATE users SET active_group_id = ? WHERE active_group_id IS NULL").run(defaultGroupId);
+  db.prepare("UPDATE users SET active_group_id = ? WHERE active_group_id IS NULL AND account_status = 'approved'").run(defaultGroupId);
   db.prepare(`
     INSERT OR IGNORE INTO group_members (group_id, user_id, role)
-    SELECT ?, id, CASE WHEN role = 'admin' THEN 'owner' ELSE 'member' END FROM users
+    SELECT ?, id, CASE WHEN role = 'admin' THEN 'owner' ELSE 'member' END FROM users WHERE account_status = 'approved'
   `).run(defaultGroupId);
   for (const table of ["events", "availability", "availability_rules", "availability_presets", "game_suggestions"]) {
     db.prepare(`UPDATE ${table} SET group_id = ? WHERE group_id IS NULL`).run(defaultGroupId);
