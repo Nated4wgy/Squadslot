@@ -42,7 +42,7 @@ try {
   await request(`/api/availability/${adminEntry.id}`, friend.cookie, {note:"Unauthorized"}, "PATCH", 403);
   await request(`/api/availability/${one.id}`, "", {note:"Unauthorized"}, "PATCH", 401);
   await request(`/api/availability/${one.id}`, friend.cookie, {date:"2030-02-31"}, "PATCH", 400);
-  await request(`/api/availability/${one.id}`, friend.cookie, {startTime:"23:00", endTime:"20:00"}, "PATCH", 400);
+  await request(`/api/availability/${one.id}`, friend.cookie, {startTime:"23:00", endTime:"23:00"}, "PATCH", 400);
   await request(`/api/availability/${one.id}`, friend.cookie, {note:"x".repeat(201)}, "PATCH", 400);
   await request(`/api/availability/${one.id}`, admin.cookie, {startTime:"18:30", userId:admin.user.id}, "PATCH");
   const list = async () => (await request("/api/availability?start=2030-01-01&end=2030-02-01", friend.cookie)).availability;

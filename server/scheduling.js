@@ -1,6 +1,6 @@
 import { db, getSetting, setSetting } from "./db.js";
 import { DateTime } from "luxon";
-import { localSegments, utcEventRange } from "./time.js";
+import { dailyAvailability, localSegments, utcEventRange } from "./time.js";
 
 function dateFromString(value) {
   return new Date(`${value}T00:00:00Z`);
@@ -21,8 +21,9 @@ export function addDateDays(value, amount) {
 }
 
 export function expandAvailability(startDate, endDate, groupId = null) {
+  const firstDate = addDateDays(startDate, -1);
   const groupClause = groupId ? " AND a.group_id = ?" : "";
-  const explicitParams = groupId ? [startDate, endDate, groupId] : [startDate, endDate];
+  const explicitParams = groupId ? [firstDate, endDate, groupId] : [firstDate, endDate];
   const explicit = db
     .prepare(`
       SELECT a.id, a.user_id AS userId, u.display_name AS displayName, u.avatar_url AS avatarUrl,
@@ -36,7 +37,7 @@ export function expandAvailability(startDate, endDate, groupId = null) {
     .all(...explicitParams);
 
   const ruleGroupClause = groupId ? " AND r.group_id = ?" : "";
-  const ruleParams = groupId ? [endDate, startDate, groupId] : [endDate, startDate];
+  const ruleParams = groupId ? [endDate, firstDate, groupId] : [endDate, firstDate];
   const rules = db
     .prepare(`
       SELECT r.id AS ruleId, r.user_id AS userId, u.display_name AS displayName,
@@ -51,12 +52,12 @@ export function expandAvailability(startDate, endDate, groupId = null) {
     .all(...ruleParams);
   const exceptions = new Set(
     db.prepare("SELECT rule_id AS ruleId, date FROM availability_exceptions WHERE date BETWEEN ? AND ?")
-      .all(startDate, endDate)
+      .all(firstDate, endDate)
       .map((item) => `${item.ruleId}:${item.date}`)
   );
 
   const recurring = [];
-  for (let cursor = startDate; cursor <= endDate; cursor = addDateDays(cursor, 1)) {
+  for (let cursor = firstDate; cursor <= endDate; cursor = addDateDays(cursor, 1)) {
     const weekday = dateFromString(cursor).getUTCDay();
     for (const rule of rules) {
       if (rule.weekday !== weekday || cursor < rule.startDate || (rule.endDate && cursor > rule.endDate)) continue;
@@ -81,13 +82,16 @@ export function expandAvailability(startDate, endDate, groupId = null) {
     }
   }
 
-  return [...explicit, ...recurring].map(item => ({ ...item, ...utcEventRange(item.date, item.startTime, item.endTime, item.timezone) })).sort((a, b) => (
+  return [...explicit, ...recurring].map(item => ({
+    ...item, ...utcEventRange(item.date, item.startTime, item.endTime, item.timezone),
+    occurrenceEndDate: item.endTime < item.startTime ? addDateDays(item.date, 1) : item.date
+  })).filter(item => item.startsAtUtc && (item.date >= startDate || (item.occurrenceEndDate === startDate && item.endTime !== "00:00"))).sort((a, b) => (
     `${a.date} ${a.startTime} ${a.displayName}`.localeCompare(`${b.date} ${b.startTime} ${b.displayName}`)
   ));
 }
 
 export function findBestSlots(startDate, endDate, availability = null, groupId = null) {
-  const expanded = availability || expandAvailability(startDate, endDate, groupId);
+  const expanded = dailyAvailability(availability || expandAvailability(startDate, endDate, groupId), startDate, endDate);
   const eventGroupClause = groupId ? " AND e.group_id = ?" : "";
   const zone = groupId ? db.prepare("SELECT timezone FROM groups WHERE id = ?").get(groupId)?.timezone || "Europe/London" : "Europe/London";
   const eventParams = groupId ? [addDateDays(startDate, -2), addDateDays(endDate, 2), groupId] : [addDateDays(startDate, -2), addDateDays(endDate, 2)];

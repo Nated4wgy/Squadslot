@@ -50,36 +50,48 @@
 
 body { background: var(--page-bg); }
 
-.event-game-image, .image-fallback.event-game-image {
+.event-game-image,
+.image-fallback.event-game-image {
   display: inline-grid; flex: 0 0 auto; width: 80px; height: 42px;
   object-fit: contain; border-radius: 4px; background: var(--surface-raised);
 }
-.next-event-art, .image-fallback.next-event-art {
+.next-event-art,
+.image-fallback.next-event-art {
   display: grid; width: min(240px, 100%); height: auto; aspect-ratio: 460 / 215;
   object-fit: contain; border-radius: 6px; margin: 16px 0 8px; background: var(--surface-raised);
 }
-.dashboard-row.with-art { grid-template-columns: 80px minmax(0, 1fr) auto; }
-.dashboard-row.with-art > span:not(.image-fallback) { min-width: 0; }
 .push-preferences { grid-column: 1 / -1; display: grid; gap: 14px; }
 .event-title-line > .image-fallback { display: grid; }
 
-button, a, input, select, textarea {
+button,
+a,
+input,
+select,
+textarea {
   -webkit-tap-highlight-color: transparent;
 }
 
-button, a {
+button,
+a {
   transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
-button:focus-visible, a:focus-visible {
+button:focus-visible,
+a:focus-visible {
   outline: 2px solid var(--accent-ink);
   outline-offset: 3px;
 }
 
 button:disabled { cursor: not-allowed; opacity: 0.5; }
-button svg, a svg { flex-shrink: 0; }
+button svg,
+a svg { flex-shrink: 0; }
 
-input, select, textarea, .session-drawer input, .session-drawer select, .suggest-form input {
+input,
+select,
+textarea,
+.session-drawer input,
+.session-drawer select,
+.suggest-form input {
   border-color: var(--line);
   color: var(--ink);
   background: var(--field-bg);
@@ -87,7 +99,8 @@ input, select, textarea, .session-drawer input, .session-drawer select, .suggest
   box-shadow: none;
 }
 
-input::placeholder, textarea::placeholder { color: var(--muted-ink); opacity: 0.85; }
+input::placeholder,
+textarea::placeholder { color: var(--muted-ink); opacity: 0.85; }
 /* iOS date/time controls otherwise retain an intrinsic width inside grid tracks. */
 input:is([type="date"], [type="time"], [type="datetime-local"]) {
   -webkit-appearance: none;
@@ -101,7 +114,9 @@ input:is([type="date"], [type="time"], [type="datetime-local"]) {
 }
 input::-webkit-date-and-time-value { min-width: 0; text-align: left; }
 input::-webkit-datetime-edit { min-width: 0; padding: 0; }
-input:focus, select:focus, textarea:focus {
+input:focus,
+select:focus,
+textarea:focus {
   border-color: var(--accent-ink);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
@@ -130,13 +145,22 @@ label {
 }
 .topbar h1 { font-size: 1.85rem; font-weight: 650; line-height: 1.2; }
 .topbar p { margin-top: 6px; font-size: 0.9rem; color: var(--muted-ink); }
-.table-panel h2, .section-title h2, .panel-heading h2 { font-size: 1.08rem; font-weight: 650; line-height: 1.4; }
-.utility-form h3, .event-expanded h3 { font-size: 1rem; font-weight: 650; }
+.table-panel h2,
+.section-title h2,
+.panel-heading h2 { font-size: 1.08rem; font-weight: 650; line-height: 1.4; }
+.utility-form h3,
+.event-expanded h3 { font-size: 1rem; font-weight: 650; }
 .panel-heading { gap: 10px; margin-bottom: 18px; }
 .panel-heading > svg { color: var(--accent-ink); margin-top: 3px; flex-shrink: 0; }
 .panel-heading p { margin-top: 4px; line-height: 1.5; }
 
-.calendar-panel, .utility-form, .session-drawer, .right-rail section, .table-panel, .dashboard-feature, .tonight-hero, .profile-preview, .event-detail-card, .auth-panel {
+.calendar-panel,
+.utility-form,
+.session-drawer,
+.right-rail section,
+.table-panel,
+.event-detail-card,
+.auth-panel {
   border-color: var(--line-soft);
   color: var(--ink);
   background: var(--surface);
@@ -144,45 +168,60 @@ label {
 }
 
 /* Page sections use dividers; only events, calendar tools and forms are framed. */
-.dashboard-panel, .tonight-layout > .table-panel {
-  border: 0;
-  border-radius: 0;
-  padding: 22px 0;
-  border-top: 1px solid var(--line-soft);
-  background: transparent;
-}
 
-.primary-button, .secondary-button, .text-button, .danger-button {
+.primary-button,
+.secondary-button,
+.text-button,
+.danger-button {
   font-weight: 650;
 }
-.primary-button, .availability-save {
+.primary-button,
+.availability-save {
   background: var(--accent);
   border: 1px solid transparent;
   color: #10221c;
 }
 .secondary-button { background: var(--surface-raised); border: 1px solid var(--line); color: var(--ink); }
 .availability-save { background: var(--accent); border-color: transparent; color: #10221c; }
-.primary-button:hover, .availability-save:hover {
+.primary-button:hover,
+.availability-save:hover {
   background: color-mix(in srgb, var(--accent) 84%, white);
 }
 .secondary-button:hover { background: var(--accent-soft); border-color: var(--accent-ink); }
 .text-button { color: var(--accent-ink); }
-.icon-button, .dark-icon-button {
+.icon-button,
+.dark-icon-button {
   background: var(--surface-raised);
   border-color: var(--line);
   color: var(--ink);
 }
-.danger-button, .danger-text-button, .invite-actions button.danger,
-.invite-actions .remove-invite-button, .form-error { color: var(--danger-ink); }
-.subscription-warning, .account-identity small { color: var(--warning-ink); }
+.danger-button,
+.danger-text-button,
+.invite-actions button.danger,
+.invite-actions .remove-invite-button,
+.form-error { color: var(--danger-ink); }
+.account-identity small { color: var(--warning-ink); }
 
 .auth-panel h1 { font-size: 2.2rem; }
-.auth-panel p, .muted, .free-time-row span, .free-time-row small,
-.friend-row span, .friend-row div:not(:first-child), .managed-event span,
-.managed-event small, .accepted-people p, .accepted-people span,
-.session-row span, .invite-row span, .invite-row small, .steam-result span,
-.game-detail p, .game-option-chips small, .availability-status,
-.dashboard-feature p, .tonight-people span, .invite-list > span, .invite-list > small {
+.auth-panel p,
+.muted,
+.free-time-row span,
+.free-time-row small,
+.friend-row span,
+.friend-row div:not(:first-child),
+.managed-event span,
+.managed-event small,
+.accepted-people p,
+.accepted-people span,
+.session-row span,
+.invite-row span,
+.invite-row small,
+.steam-result span,
+.game-detail p,
+.game-option-chips small,
+.availability-status,
+.invite-list > span,
+.invite-list > small {
   color: var(--muted-ink);
 }
 
@@ -196,65 +235,81 @@ label {
   color: var(--ink);
   box-shadow: 0 1px 3px #00000014;
 }
-.manage-availability-button, .weekday-picker button, .invite-actions button,
-.invite-list button, .preset-strip button, .game-option-chips button {
+.manage-availability-button,
+.weekday-picker button,
+.invite-actions button,
+.invite-list button,
+.preset-strip button,
+.game-option-chips button {
   color: var(--muted-ink);
   background: var(--surface-raised);
   border-color: var(--line);
   font-weight: 600;
 }
-.weekday-picker button.active, .invite-actions button.selected, .invite-list button.selected {
+.weekday-picker button.active,
+.invite-actions button.selected,
+.invite-list button.selected {
   color: var(--accent-ink);
   background: var(--accent-soft);
   border-color: var(--accent-ink);
 }
 
-.friend-row, .free-time-row, .managed-event, .session-row, .invite-row,
-.steam-result, .rule-list > div, .account-card, .vote-grid > button,
-.event-notes, .tonight-people > div, .group-list article, .proposal-votes button,
-.backup-list a, .audit-list article {
+.friend-row,
+.free-time-row,
+.managed-event,
+.session-row,
+.invite-row,
+.steam-result,
+.rule-list > div,
+.account-card,
+.vote-grid > button,
+.event-notes,
+.group-list article,
+.proposal-votes button,
+.backup-list a,
+.audit-list article {
   background: var(--surface-raised);
   color: var(--ink);
   border-color: var(--line-soft);
 }
-.steam-result:hover, .dashboard-row:hover, .best-time-list button:hover,
+.steam-result:hover,
+.best-time-list button:hover,
 .suggestion-grid a:hover { background: var(--accent-soft); }
-.account-password-form, .event-expanded, .notification-row { border-color: var(--line-soft); }
+.account-password-form,
+.event-expanded,
+.notification-row { border-color: var(--line-soft); }
 .game-detail { background: transparent; color: var(--ink); border-left: 1px solid var(--line-soft); border-radius: 0; }
 .tag-list span { color: var(--accent-ink); background: var(--accent-soft); }
-
-.dashboard-grid { gap: 28px 32px; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); align-items: start; }
-.dashboard-feature { min-height: 252px; padding: 26px; border-left: 3px solid var(--accent); justify-content: center; }
-.dashboard-feature h2 { font-size: 1.65rem; line-height: 1.3; font-weight: 650; }
-.dashboard-feature > strong { font-size: 0.9rem; font-weight: 550; }
 .eyebrow { color: var(--accent-ink); font-weight: 650; font-size: 0.72rem; }
-.dashboard-row { grid-template-columns: minmax(0, 1fr) auto; }
-.dashboard-row, .best-time-list button, .suggestion-grid a {
+.best-time-list button,
+.suggestion-grid a {
   min-height: 62px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line-soft);
   border-radius: 0;
   background: transparent;
 }
-.dashboard-row strong, .best-time-list strong, .suggestion-grid strong { font-weight: 600; }
-.best-time-list small, .dashboard-row small, .suggestion-grid small { margin-top: 3px; font-size: 0.8rem; }
+.best-time-list strong,
+.suggestion-grid strong { font-weight: 600; }
+.best-time-list small,
+.suggestion-grid small { margin-top: 3px; font-size: 0.8rem; }
 .best-time-list { gap: 0; }
 .rank { background: var(--accent-soft); color: var(--accent-ink); font-size: 0.8rem; font-weight: 650; }
 .overlap-count { color: var(--accent-ink); font-size: 0.85rem; font-weight: 650; }
 .suggestion-grid { grid-template-columns: 1fr; gap: 0; }
 .suggestion-grid a > span { min-width: 0; }
-.suggestion-grid img, .suggestion-grid .image-fallback { width: 86px; height: 42px; object-fit: cover; }
-.tonight-hero { min-height: 300px; border-left: 3px solid var(--accent); }
-.tonight-hero h2 { font-size: 1.85rem; font-weight: 650; }
+.suggestion-grid img,
+.suggestion-grid .image-fallback { width: 86px; height: 42px; object-fit: cover; }
 .ready-card { border-left-color: var(--accent); }
-.availability-range, .availability-time-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.availability-range,
+.availability-time-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .availability-range label { min-width: 0; }
-.availability-range input, .availability-time-fields input { max-width: 100%; }
-.toggle-line small, .template-vars { color: var(--muted-ink); }
+.availability-range input,
+.availability-time-fields input { max-width: 100%; }
+.toggle-line small,
+.template-vars { color: var(--muted-ink); }
 
 @media (max-width: 900px) {
-  .dashboard-grid { grid-template-columns: 1fr; gap: 24px; }
-  .dashboard-feature { min-height: 230px; }
 }
 
 @media (max-width: 720px) {
@@ -263,11 +318,10 @@ label {
   .topbar p { font-size: 0.86rem; }
   .topbar { gap: 14px; }
   .table-panel { padding: 16px; }
-  .dashboard-feature, .tonight-hero { min-height: 230px; padding: 20px; }
-  .dashboard-feature h2 { font-size: 1.5rem; }
-  .dashboard-panel { padding: 18px 0 0; }
   .game-detail { border-left: 0; border-top: 1px solid var(--line-soft); padding: 18px 0; }
-  input, select, textarea { font-size: 16px; }
+  input,
+select,
+textarea { font-size: 16px; }
   .availability-form-actions { flex-wrap: wrap; }
   .weekday-picker { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 }
@@ -277,5 +331,6 @@ label {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  button, a { transition: none; }
+  button,
+a { transition: none; }
 }

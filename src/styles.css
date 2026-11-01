@@ -1124,7 +1124,9 @@ textarea {
   font-size: 1.2rem;
 }
 
-.person-line, .event-title-line, .panel-heading {
+.person-line,
+.event-title-line,
+.panel-heading {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1215,8 +1217,7 @@ textarea {
   gap: 7px;
 }
 
-.best-time-list button,
-.dashboard-row {
+.best-time-list button {
   width: 100%;
   min-height: 52px;
   border: 0;
@@ -1232,14 +1233,11 @@ textarea {
 }
 
 .best-time-list strong,
-.best-time-list small,
-.dashboard-row strong,
-.dashboard-row small {
+.best-time-list small {
   display: block;
 }
 
-.best-time-list small,
-.dashboard-row small {
+.best-time-list small {
   color: var(--muted-ink);
 }
 
@@ -1281,8 +1279,7 @@ textarea {
   gap: 20px;
 }
 
-.compact-form,
-.profile-fields {
+.compact-form {
   display: grid;
   gap: 12px;
 }
@@ -1326,44 +1323,10 @@ textarea {
   color: #aeb8b6;
 }
 
-.dashboard-grid {
-  display: grid;
-  grid-template-columns: minmax(300px, 1.1fr) minmax(280px, 0.9fr);
-  gap: 20px;
-}
-
-.dashboard-feature,
-.tonight-hero,
-.profile-preview,
 .event-detail-card {
   border: 1px solid rgba(245, 241, 232, 0.1);
   border-radius: 8px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.22);
-}
-
-.dashboard-feature {
-  min-height: 300px;
-  padding: 26px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-end;
-  background: #1b2021;
-  color: #f5f1e8;
-}
-
-.dashboard-feature h2 {
-  margin: 8px 0 0;
-  font-size: 2rem;
-}
-
-.dashboard-feature p {
-  margin: 2px 0 14px;
-  color: #aeb8b6;
-}
-
-.dashboard-feature .primary-button {
-  margin-top: 18px;
 }
 
 .eyebrow {
@@ -1384,10 +1347,6 @@ textarea {
 
 .avatar-stack .avatar + .avatar {
   margin-left: -8px;
-}
-
-.dashboard-panel {
-  min-height: 0;
 }
 
 .suggestion-grid {
@@ -1425,43 +1384,6 @@ textarea {
 
 .suggestion-grid small {
   color: var(--muted-ink);
-}
-
-.tonight-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
-  gap: 20px;
-}
-
-.tonight-hero {
-  min-height: 500px;
-  padding: 28px;
-  background: #1b2021;
-  color: #f5f1e8;
-}
-
-.tonight-hero h2 {
-  margin: 10px 0 24px;
-  font-size: 2.4rem;
-}
-
-.tonight-people {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 12px;
-}
-
-.tonight-people > div {
-  padding: 14px;
-  border-radius: 6px;
-  display: grid;
-  justify-items: start;
-  gap: 7px;
-  background: rgba(245, 241, 232, 0.08);
-}
-
-.tonight-people span {
-  color: #aeb8b6;
 }
 
 .event-detail-list {
@@ -1648,82 +1570,6 @@ textarea {
   background: rgba(21, 25, 26, 0.05);
 }
 
-.profile-editor {
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
-  gap: 20px;
-  align-items: start;
-}
-
-.profile-preview {
-  min-height: 310px;
-  padding: 24px;
-  display: grid;
-  place-items: center;
-  align-content: center;
-  background: #1b2021;
-  color: #f5f1e8;
-  text-align: center;
-}
-
-.profile-preview h2,
-.profile-preview p {
-  margin: 8px 0 0;
-}
-
-.calendar-subscription-panel {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: 14px;
-}
-
-.calendar-subscription-panel .panel-heading > div {
-  min-width: 0;
-  flex: 1;
-}
-
-.subscription-state {
-  margin-left: auto;
-  min-width: 54px;
-  min-height: 28px;
-  border-radius: 999px;
-  display: inline-grid;
-  place-items: center;
-  background: rgba(21, 25, 26, 0.08);
-  color: var(--muted-ink);
-  font-size: 0.76rem;
-  font-weight: 900;
-}
-
-.subscription-state.active {
-  background: color-mix(in srgb, var(--accent) 30%, white);
-  color: #101313;
-}
-
-.subscription-meta,
-.subscription-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.subscription-meta {
-  color: var(--muted-ink);
-  font-size: 0.82rem;
-}
-
-.subscription-url {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px max-content;
-  gap: 8px;
-}
-
-.subscription-url input {
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 0.82rem;
-}
-
 .dark-icon-button {
   border-color: rgba(21, 25, 26, 0.16);
   background: #15191a;
@@ -1742,27 +1588,6 @@ textarea {
   background: rgba(180, 35, 24, 0.08);
   color: #b42318;
   font-weight: 850;
-}
-
-.subscription-warning {
-  margin: 0;
-  color: #7b4a28;
-  font-size: 0.8rem;
-}
-
-.appearance-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr 54px;
-  gap: 12px;
-  align-items: end;
-}
-
-.theme-icons {
-  height: 42px;
-  border-radius: 6px;
-  display: grid;
-  place-items: center;
-  background: rgba(21, 25, 26, 0.06);
 }
 
 .skeleton-list {
@@ -1839,9 +1664,8 @@ textarea {
   }
 
   .side-stack,
-  .admin-grid,
-  .games-browser,
-  .dashboard-grid {
+.admin-grid,
+.games-browser {
     grid-template-columns: 1fr 1fr;
   }
 
@@ -1861,13 +1685,10 @@ textarea {
 
 @media (min-width: 721px) and (max-width: 900px) {
   .side-stack,
-  .admin-grid,
-  .games-browser,
-  .dashboard-grid,
-  .tonight-layout,
-  .free-time-layout,
-  .profile-editor,
-  .event-expanded {
+.admin-grid,
+.games-browser,
+.free-time-layout,
+.event-expanded {
     grid-template-columns: 1fr;
   }
 
@@ -1882,7 +1703,8 @@ textarea {
 
 @media (max-width: 720px) {
 
-  .topbar, .section-title {
+  .topbar,
+.section-title {
     align-items: flex-start;
   }
 
@@ -1900,21 +1722,18 @@ textarea {
   }
 
   .side-stack,
-  .admin-grid,
-  .games-browser,
-  .free-time-layout,
-  .recurring-panel,
-  .dashboard-grid,
-  .tonight-layout,
-  .profile-editor,
-  .event-expanded,
-  .two-col,
-  .template-grid {
+.admin-grid,
+.games-browser,
+.free-time-layout,
+.recurring-panel,
+.event-expanded,
+.two-col,
+.template-grid {
     grid-template-columns: 1fr;
   }
 
   .availability-form-head,
-  .calendar-title-actions {
+.calendar-title-actions {
     width: 100%;
     align-items: stretch;
     flex-direction: column;
@@ -1933,7 +1752,7 @@ textarea {
   }
 
   .toolbar,
-  .search-bar {
+.search-bar {
     width: 100%;
     grid-template-columns: 1fr;
   }
@@ -1951,14 +1770,14 @@ textarea {
   }
 
   .session-row,
-  .invite-row,
-  .free-time-row,
-  .managed-event {
+.invite-row,
+.free-time-row,
+.managed-event {
     align-items: flex-start;
   }
 
   .session-row,
-  .invite-row {
+.invite-row {
     flex-direction: column;
   }
 
@@ -2000,29 +1819,8 @@ textarea {
     grid-column: 1;
   }
 
-  .appearance-row {
-    grid-template-columns: 1fr;
-  }
-
-  .subscription-url {
-    grid-template-columns: minmax(0, 1fr) 42px;
-  }
-
-  .subscription-url .secondary-button {
-    grid-column: 1 / -1;
-  }
-
-  .subscription-actions > * {
-    width: 100%;
-  }
-
   .suggestion-grid {
     grid-template-columns: 1fr;
-  }
-
-  .dashboard-feature,
-  .tonight-hero {
-    min-height: 360px;
   }
 
   .main-stack > .session-drawer {
@@ -2050,7 +1848,7 @@ textarea {
   }
 
   .auth-panel h1,
-  .password-change-heading h1 {
+.password-change-heading h1 {
     font-size: 2.25rem;
   }
 }
@@ -2068,13 +1866,13 @@ textarea {
   }
 
   .toolbar .secondary-button,
-  .toolbar .primary-button {
+.toolbar .primary-button {
     width: 100%;
   }
 
   .table-panel,
-  .event-summary,
-  .event-expanded {
+.event-summary,
+.event-expanded {
     padding: 14px;
   }
 
@@ -2085,7 +1883,7 @@ textarea {
   }
 
   .account-controls select,
-  .account-controls .secondary-button {
+.account-controls .secondary-button {
     width: 100%;
   }
 }
@@ -2247,15 +2045,15 @@ textarea {
 
 @media (max-width: 900px) {
   .group-layout,
-  .proposal-layout {
+.proposal-layout {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 600px) {
   .archive-event,
-  .group-list article,
-  .proposal-option-row {
+.group-list article,
+.proposal-option-row {
     grid-template-columns: 1fr;
   }
 

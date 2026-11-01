@@ -5,8 +5,11 @@ import { addTime, calendarStartHour, calendarEndHour, calendarPlacement, eventDu
 import { availabilityDate } from "../availability/labels.js";
 import { availabilityBlocksForDay, eventLanes, minutesLabel } from "./calendar-logic.js";
 import styles from "./calendar.module.css";
+import { splitCalendarEntries } from "../../lib/overnight.js";
 
 export function CalendarGrid({ user, days, availability, events, bestSlots, onAvailabilityDraft, onReschedule, onOpenEvents, personal = false, onEditAvailability }) {
+  availability = splitCalendarEntries(availability);
+  events = splitCalendarEntries(events);
   const scheduling = useSchedulingTime();
   const [drag, setDrag] = useState(null);
   const dragRef = useRef(null);
@@ -16,7 +19,7 @@ export function CalendarGrid({ user, days, availability, events, bestSlots, onAv
   const visibleDates = new Set(days.map(localDate));
   const slots = bestSlots.filter(slot => visibleDates.has(slot.date));
   const maxOverlap = Math.max(1, ...slots.map(slot => slot.count));
-  const startHour = personal ? Math.min(calendarStartHour, ...availability.map(item => Math.floor(timeMinutes(item.startTime) / 60))) : calendarStartHour;
+  const startHour = Math.min(calendarStartHour, ...[...availability, ...events].filter(item => visibleDates.has(item.date)).map(item => Math.floor(timeMinutes(item.startTime) / 60)));
   const hourCount = calendarEndHour - startHour;
   const hours = Array.from({ length: hourCount }, (_, i) => minutesLabel((startHour + i) * 60));
   const placement = (start, end) => calendarPlacement(start, end, startHour);
@@ -40,7 +43,7 @@ export function CalendarGrid({ user, days, availability, events, bestSlots, onAv
       date: localDate(selectedDays[0]), dates: selectedDays.map(localDate),
       weekdays: [...new Set(selectedDays.map(day => day.getDay()))],
       startDate: localDate(selectedDays[0]), startTime: minutesLabel(start * 60),
-      endTime: end >= 23 ? "23:59" : minutesLabel((end + 1) * 60)
+      endTime: end >= 23 ? "00:00" : minutesLabel((end + 1) * 60)
     });
     updateDrag(null);
   }
@@ -51,7 +54,8 @@ export function CalendarGrid({ user, days, availability, events, bestSlots, onAv
     return () => { window.removeEventListener("mouseup", finishDrag); window.removeEventListener("blur", cancel); };
   });
 
-  const selectedEvent = selection?.kind === "event" ? events.find(event => event.id === selection.id && visibleDates.has(event.date)) : null;
+  const selectedSegment = selection?.kind === "event" ? events.find(event => event.id === selection.id && visibleDates.has(event.date)) : null;
+  const selectedEvent = selectedSegment?.source || selectedSegment;
   const selectedBlock = selection?.kind === "free" && visibleDates.has(selection.date)
     ? availabilityBlocksForDay(selection.date, availability, events, bestSlots).find(block => block.start === selection.start) : null;
   const selectedSlot = selection?.kind === "slot" ? slots.find(slot => slot.date === selection.date && slot.startTime === selection.startTime) : null;
@@ -70,7 +74,7 @@ export function CalendarGrid({ user, days, availability, events, bestSlots, onAv
           </button>)}
         </div>
       </div>}
-      <div className={`${styles.scroll} pulse-calendar-scroll`} style={{ "--day-count": days.length }}>
+      <div className={`${styles.scroll} ${hourCount > 12 ? styles.extended : ""} pulse-calendar-scroll`} style={{ "--day-count": days.length }}>
         <div className={styles.weekHead}>
           <span />
           {days.map(day => <div key={localDate(day)} className={localDate(day) === scheduling.date ? styles.today : ""}>
@@ -82,7 +86,7 @@ export function CalendarGrid({ user, days, availability, events, bestSlots, onAv
           <div className={styles.days}>
             {days.map((day, dayIndex) => {
               const date = localDate(day);
-              const dayEvents = events.filter(event => event.date === date && timeMinutes(event.endTime) > calendarStartHour * 60 && timeMinutes(event.startTime) < calendarEndHour * 60);
+              const dayEvents = events.filter(event => event.date === date && timeMinutes(event.endTime) > startHour * 60 && timeMinutes(event.startTime) < calendarEndHour * 60);
               const blocks = personal ? [] : availabilityBlocksForDay(date, availability, events, bestSlots);
               const personalLanes = eventLanes(availability.filter(item => item.date === date));
               const lanes = eventLanes(dayEvents);
@@ -110,8 +114,8 @@ export function CalendarGrid({ user, days, availability, events, bestSlots, onAv
                       if (!draggedEvent) return;
                       const { id, duration } = draggedEvent;
                       setDropError("");
-                      if (timeMinutes(hour) + Math.round(duration * 60) > 1439) {
-                        setDropError("Choose an earlier start so the full session ends before midnight.");
+                      if (duration >= 24) {
+                        setDropError("Sessions must be shorter than 24 hours.");
                         return;
                       }
                       if (id) onReschedule(id, date, hour, addTime(hour, duration));
@@ -121,7 +125,7 @@ export function CalendarGrid({ user, days, availability, events, bestSlots, onAv
                   {personal && personalLanes.entries.map(({event: item, lane}) => <button key={item.id} type="button" data-personal-availability data-availability-id={item.id}
                     className={`${styles.freeBlock} ${timeMinutes(item.endTime) - timeMinutes(item.startTime) < 60 ? styles.short : ""}`}
                     style={{ ...placement(item.startTime, item.endTime), "--lane": lane, "--lanes": personalLanes.count, "--intensity": "20%" }}
-                    aria-label={`Edit free time on ${availabilityDate(item.date)}, ${item.startTime} to ${item.endTime}`} onClick={event => { event.currentTarget.focus(); onEditAvailability([item]); }}>
+                    aria-label={`Edit free time on ${availabilityDate(item.date)}, ${item.startTime} to ${item.endTime}`} onClick={event => { event.currentTarget.focus(); onEditAvailability([item.source || item]); }}>
                     <span className={styles.blockContent}><strong>{item.startTime}-{item.endTime}</strong><small>{formatDate(item.date)}</small><span>{item.recurring ? <Repeat size={14} /> : null} {item.note || "Free time"}</span></span>
                   </button>)}
                   {blocks.map(block => {
@@ -134,7 +138,7 @@ export function CalendarGrid({ user, days, availability, events, bestSlots, onAv
                       onClick={event => {
                         event.currentTarget.focus();
                         setSelection(detail);
-                        onEditAvailability(availability.filter(item => item.date === date && block.playerIds.includes(item.userId) && timeMinutes(item.startTime) < block.end && timeMinutes(item.endTime) > block.start));
+                        onEditAvailability(availability.filter(item => item.date === date && block.playerIds.includes(item.userId) && timeMinutes(item.startTime) < block.end && timeMinutes(item.endTime) > block.start).map(item => item.source || item));
                       }} onFocus={() => setSelection(detail)} onMouseEnter={() => { if (!drag) setSelection(detail); }}>
                       <span className={styles.blockContent}><strong>{block.freeItems.length} free {block.isBest && <Sparkles size={12} />}</strong><small>{minutesLabel(block.start)}-{minutesLabel(block.end)}</small>
                         <span className={styles.playerNames}>{block.freeItems.map(player => player.displayName).join(", ")}</span>
@@ -151,7 +155,7 @@ export function CalendarGrid({ user, days, availability, events, bestSlots, onAv
                       aria-label={`${event.title}, ${event.startTime} to ${event.endTime}, ${guests.length} accepted`}
                       draggable={event.ownerId === user.id || user.role === "admin"}
                       onDragStart={dragEvent => {
-                        draggedEventRef.current = { id: event.id, duration: eventDurationHours(event) };
+                        draggedEventRef.current = { id: event.id, duration: eventDurationHours(event.source || event) };
                         dragEvent.dataTransfer.effectAllowed = "move";
                         dragEvent.dataTransfer.setData("text/plain", String(event.id));
                       }}
@@ -174,13 +178,13 @@ export function CalendarGrid({ user, days, availability, events, bestSlots, onAv
       {!personal && <div className={styles.inspector} aria-label="Calendar details" aria-live="polite">
         {selectedEvent ? <>
           <EventGameImage event={selectedEvent} />
-          <div className={styles.detailCopy}><strong>{selectedEvent.title}</strong><span>{selectedEvent.gameTitle || "Game TBD"} · {formatDate(selectedEvent.date)} · {selectedEvent.startTime}-{selectedEvent.endTime}</span><span>{accepted.length}/{selectedEvent.maxPlayers} accepted: {accepted.map(guest => guest.displayName).join(", ") || "No one yet"}</span></div>
+          <div className={styles.detailCopy}><strong>{selectedEvent.title}</strong><span>{selectedEvent.gameTitle || "Game TBD"} · {formatDate(selectedEvent.date)} · {selectedEvent.startTime}-{selectedEvent.endTime}{selectedEvent.crossesDay ? " (next day)" : ""}</span><span>{accepted.length}/{selectedEvent.maxPlayers} accepted: {accepted.map(guest => guest.displayName).join(", ") || "No one yet"}</span></div>
           <button type="button" className="secondary-button" onClick={onOpenEvents}><CalendarDays size={16} /> Events</button>
         </> : selectedBlock || selectedSlot ? <>
           <UsersRound size={20} />
           <div className={styles.detailCopy}><strong>{formatDate(selection.date)} · {selectedBlock ? `${minutesLabel(selectedBlock.start)}-${minutesLabel(selectedBlock.end)}` : `${selectedSlot.startTime}-${selectedSlot.endTime}`}</strong><span>{people.map(player => player.displayName).join(", ")}</span></div>
-          <button type="button" className="secondary-button" onClick={() => onAvailabilityDraft({ mode: "once", date: selection.date, startTime: selectedBlock ? minutesLabel(selectedBlock.start) : selectedSlot.startTime, endTime: selectedBlock ? minutesLabel(Math.min(selectedBlock.end, 1439)) : selectedSlot.endTime })}><Clock size={16} /> Add free time</button>
-        </> : <><CalendarDays size={20} /><div className={styles.detailCopy}><strong>{events.filter(event => visibleDates.has(event.date)).length} sessions this week</strong><span>{best ? `Best overlap: ${formatDate(best.date)}, ${best.startTime}-${best.endTime}, ${best.count} players` : "No shared slots yet"}</span></div></>}
+          <button type="button" className="secondary-button" onClick={() => onAvailabilityDraft({ mode: "once", date: selection.date, startTime: selectedBlock ? minutesLabel(selectedBlock.start) : selectedSlot.startTime, endTime: (selectedBlock ? minutesLabel(selectedBlock.end) : selectedSlot.endTime).replace("24:00", "00:00") })}><Clock size={16} /> Add free time</button>
+        </> : <><CalendarDays size={20} /><div className={styles.detailCopy}><strong>{new Set(events.filter(event => visibleDates.has(event.date)).map(event => event.id)).size} sessions this week</strong><span>{best ? `Best overlap: ${formatDate(best.date)}, ${best.startTime}-${best.endTime}, ${best.count} players` : "No shared slots yet"}</span></div></>}
       </div>}
     </section>
   );

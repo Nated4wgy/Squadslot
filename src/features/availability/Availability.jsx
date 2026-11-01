@@ -9,6 +9,8 @@ import styles from "./availability.module.css";
 import { useSchedulingTime } from "../../lib/scheduling-time.jsx";
 
 export { weekdays, weekdayOrder } from "./labels.js";
+import { OvernightHint } from "../../components/OvernightHint.jsx";
+import { overnightLabel } from "../../lib/overnight.js";
 
 export function AvailabilityForm({ selectedDate, onCreated, compact = false, draft, onManage }) {
   const scheduling = useSchedulingTime();
@@ -175,6 +177,7 @@ export function AvailabilityForm({ selectedDate, onCreated, compact = false, dra
         <input type="time" value={form.endTime} onChange={(event) => setForm({ ...form, endTime: event.target.value })} />
       </div>
       <input placeholder="Note" value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} />
+      <OvernightHint start={form.startTime} end={form.endTime} />
       {form.mode === "weekly" && <p className="muted">Occurrences with missing or repeated clock-change times are skipped.</p>}
       <button className="secondary-button availability-save" type="submit"><Check size={16} /> Save {form.mode === "weekly" ? "weekly" : ""}</button>
       {status && <p className={`availability-status${status.includes("invalid") || status.includes("required") ? " form-error" : ""}`}>{status}</p>}
@@ -270,12 +273,13 @@ export function RecurringAvailability({ refresh, user, ownerFilter, refreshKey }
           <label>Ends (optional)<input type="date" value={rule.endDate} onChange={(event) => setRule({ ...rule, endDate: event.target.value })} /></label>
         </div>
         <input placeholder="Note" value={rule.note} onChange={(event) => setRule({ ...rule, note: event.target.value })} />
+        <OvernightHint start={rule.startTime} end={rule.endTime} />
         <p className="muted">Occurrences with missing or repeated clock-change times are skipped.</p>
         <button className="secondary-button"><Repeat size={16} /> Add weekly rule</button>
         <div className="rule-list">
           {rules.filter(item => ownerFilter === "all" || item.userId === user.id).map((item) => (
             <div key={item.id}>
-              <span className={styles.ruleSummary}><strong>Every {weekdays[item.weekday]} · {item.startTime}-{item.endTime}</strong>
+              <span className={styles.ruleSummary}><strong>Every {weekdays[item.weekday]} · {item.startTime}-{item.endTime}{overnightLabel(item.startTime, item.endTime)}</strong>
                 {ownerFilter === "all" && <small>{item.displayName}</small>}
                 <small>{availabilityDate(item.startDate)} - {item.endDate ? availabilityDate(item.endDate) : "No end date"}</small>
                 <small>{item.nextDate ? `Next: ${availabilityDate(item.nextDate)}` : "No upcoming dates"}</small>
@@ -296,11 +300,12 @@ export function RecurringAvailability({ refresh, user, ownerFilter, refreshKey }
           <input type="time" value={preset.endTime} onChange={(event) => setPreset({ ...preset, endTime: event.target.value })} />
         </div>
         <input placeholder="Note" value={preset.note} onChange={(event) => setPreset({ ...preset, note: event.target.value })} />
+        <OvernightHint start={preset.startTime} end={preset.endTime} />
         <button className="secondary-button"><Plus size={16} /> Save preset</button>
         <div className="rule-list">
           {presets.map((item) => (
             <div key={item.id}>
-              <span><strong>{item.name}</strong> {item.startTime}-{item.endTime}</span>
+              <span><strong>{item.name}</strong> {item.startTime}-{item.endTime}{overnightLabel(item.startTime, item.endTime)}</span>
               <button type="button" className="danger-button" onClick={() => removePreset(item.id)} aria-label="Delete preset"><Trash2 size={15} /></button>
             </div>
           ))}
@@ -353,7 +358,7 @@ export function FreeTimeView({ user, availability, refresh, onOpenCalendar }) {
             {dates.map(date => <section key={date} className={styles.agendaDay}><h3>{availabilityDate(date)}</h3>{visibleAvailability.filter(item => item.date === date).map(item => (
                 <article className="free-time-row" key={item.id}>
                   <div>
-                    <strong>{item.startTime} to {item.endTime}</strong>
+                    <strong>{item.startTime} to {item.endTime}{overnightLabel(item.startTime, item.endTime)}</strong>
                     {ownerFilter === "all" && <span>{item.displayName}</span>}
                     <small>{item.recurring ? `Every ${weekdays[item.weekday]}` : "One-off"}{item.note ? ` - ${item.note}` : ""}</small>
                   </div>

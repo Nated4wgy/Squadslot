@@ -42,7 +42,7 @@ export function formatDate(value, options = { weekday: "short", day: "numeric", 
 
 export function addTime(time, hoursToAdd) {
   const [hours, minutes] = time.split(":").map(Number);
-  const total = Math.min((23 * 60) + 59, (hours * 60) + minutes + Math.round(hoursToAdd * 60));
+  const total = ((hours * 60) + minutes + Math.round(hoursToAdd * 60)) % (24 * 60);
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
@@ -64,6 +64,7 @@ export function calendarPlacement(startTime, endTime, startHour = calendarStartH
 export function eventDurationHours(event) {
   const [startHour, startMinute] = event.startTime.split(":").map(Number);
   const [endHour, endMinute] = event.endTime.split(":").map(Number);
-  return Math.max(1 / 60, ((endHour * 60 + endMinute) - (startHour * 60 + startMinute)) / 60);
+  const minutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
+  return Math.max(1 / 60, (minutes < 0 ? minutes + 1440 : minutes) / 60);
 }
 

@@ -5,6 +5,8 @@ import { FormField, FormMessage, FormActions } from "../../components/forms.jsx"
 import { availabilityDate, weekdays } from "./labels.js";
 import styles from "./availability-editor.module.css";
 
+import { OvernightHint } from "../../components/OvernightHint.jsx";
+
 export function AvailabilityDialog({ items, user, onClose, onSaved }) {
   const dialog = useRef(null);
   const busy = useRef(false);
@@ -71,6 +73,7 @@ function AvailabilityDetails({ item, user, onBusy, onSaved, onClose }) {
         <div className={styles.columns}><FormField label="Starts" type="date" required value={form.startDate} onChange={change("startDate")} /><FormField label="Ends (optional)" type="date" min={form.startDate} value={form.endDate} onChange={change("endDate")} /></div>
       </> : <FormField label="Date" type="date" required value={form.date} onChange={change("date")} />}
       <div className={styles.columns}><FormField label="Start time" type="time" required value={form.startTime} onChange={change("startTime")} /><FormField label="End time" type="time" required value={form.endTime} onChange={change("endTime")} /></div>
+      <OvernightHint start={form.startTime} end={form.endTime} />
       <FormField label="Note" as="textarea" maxLength={200} value={form.note} onChange={change("note")} />
     </fieldset>
     {error && <FormMessage type="error">{error}</FormMessage>}

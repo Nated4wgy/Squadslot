@@ -1,13 +1,16 @@
 import { calendarStartHour, calendarEndHour, timeMinutes } from "../../lib/dates.js";
+import { splitCalendarEntries } from "../../lib/overnight.js";
 
 export function samePlayers(left, right) {
   return left.length === right.length && left.every((id, index) => id === right[index]);
 }
 
 export function availabilityBlocksForDay(date, availability, events, bestSlots) {
+  availability = splitCalendarEntries(availability);
+  events = splitCalendarEntries(events);
   const dayAvailability = availability.filter((item) => item.date === date);
   const dayEvents = events.filter((item) => item.date === date);
-  const minMinute = calendarStartHour * 60;
+  const minMinute = Math.min(calendarStartHour * 60, ...availability.map(item => timeMinutes(item.startTime)), ...events.map(item => timeMinutes(item.startTime)));
   const maxMinute = calendarEndHour * 60;
   const boundaries = new Set([minMinute, maxMinute]);
 

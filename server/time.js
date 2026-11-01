@@ -9,9 +9,27 @@ export function localInstant(date, time, timezone) {
 }
 
 export function utcEventRange(date, startTime, endTime, timezone) {
+  if (startTime === endTime) return null;
   const start = localInstant(date, startTime, timezone);
-  const end = localInstant(date, endTime, timezone);
+  const endDate = start && endTime < startTime ? start.plus({ days: 1 }).toISODate() : date;
+  const end = localInstant(endDate, endTime, timezone);
   if (!start || !end || end <= start) return null;
+  return { startsAtUtc: start.toUTC().toISO(), endsAtUtc: end.toUTC().toISO() };
+}
+
+// Display/overlap segments use 24:00 for an exact midnight boundary.
+export function dailyAvailability(items, startDate, endDate) {
+  return items.flatMap(item => {
+    const timezone = item.timezone || "Europe/London";
+    const range = item.startsAtUtc ? item : utcEventRange(item.date, item.startTime, item.endTime, timezone);
+    return range ? localSegments(range.startsAtUtc, range.endsAtUtc, timezone, startDate, endDate)
+      .map(segment => ({ ...item, ...segment })) : [];
+  });
+}
+
+export function utcSegmentRange(date, startTime, endTime, timezone) {
+  const start = DateTime.fromISO(`${date}T${startTime}`, { zone: timezone });
+  const end = endTime === "24:00" ? start.startOf("day").plus({ days: 1 }) : DateTime.fromISO(`${date}T${endTime}`, { zone: timezone });
   return { startsAtUtc: start.toUTC().toISO(), endsAtUtc: end.toUTC().toISO() };
 }
 

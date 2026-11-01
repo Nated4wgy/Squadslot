@@ -6,6 +6,8 @@ import { useDebouncedSteamSearch } from "../../lib/useSteamSearch.js";
 import { FormMessage } from "../../components/forms.jsx";
 import styles from "./event-form.module.css";
 
+import { OvernightHint } from "../../components/OvernightHint.jsx";
+
 export function EventForm({ games, friends, selectedDate, onSearchGames, onCreated, expanded, onToggle }) {
   const [form, setForm] = useState({
     title: "New session",
@@ -70,6 +72,7 @@ export function EventForm({ games, friends, selectedDate, onSearchGames, onCreat
       <button className="pulse-dock-label" type="button" onClick={() => onToggle(!expanded)}><Plus size={18} /><span>New session</span></button>
       <label className="pulse-date-field"><span>Date</span><input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
       <label className="pulse-time-field"><span>Time</span><div><input type="time" value={form.startTime} onChange={(event) => setForm({ ...form, startTime: event.target.value })} /><i>-</i><input type="time" value={form.endTime} onChange={(event) => setForm({ ...form, endTime: event.target.value })} /></div></label>
+      <OvernightHint start={form.startTime} end={form.endTime} />
       <label className="pulse-game-field"><span>Game</span><select value={form.steamAppId} onChange={(event) => chooseGame(event.target.value)}><option value="">Select a game</option>{games.map((game) => <option value={game.appId} key={game.appId}>{game.title}</option>)}</select></label>
       <button className="pulse-invite-trigger" type="button" onClick={() => onToggle(true)}><UsersRound size={17} /> {form.inviteIds.length ? `${form.inviteIds.length} invited` : "Select players"}</button>
       <button className="pulse-create-session" type="submit" disabled={saving}><Send size={16} /> {saving ? "Creating..." : "Create session"}</button>

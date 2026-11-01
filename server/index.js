@@ -24,8 +24,9 @@ import { addPushRoutes, runPushSweep } from "./push.js";
 import { asyncRoute, dateRange, isDateString, validNewPassword } from "./validation.js";
 import { addAvailabilityEditingRoutes, matchesRuleDate } from "./availability-editing.js";
 import { backupEncryptionReady, decryptBackup, encryptBackup, MAX_BACKUP_BYTES, restoreOptions } from "./backup-crypto.js";
-import { localInstant, localSegments, utcEventRange, timeValidationMessage } from "./time.js";
+import { dailyAvailability, localInstant, localSegments, utcEventRange, utcSegmentRange, timeValidationMessage } from "./time.js";
 import { configureProxy, installStorageLimits, rateLimit } from "./protection.js";
+import { createStorageMonitor } from "./storage.js";
 
 if (process.env.SQUADSLOT_CLEAN_DEMO_DATA === "true") {
   cleanupDemoOnlyDatabase();
@@ -48,6 +49,7 @@ function boundedBackupSetting(value, fallback, maximum) {
 const backupIntervalHours = boundedBackupSetting(process.env.BACKUP_INTERVAL_HOURS, 24, 168);
 const backupRetention = boundedBackupSetting(process.env.BACKUP_RETENTION, 14, 365);
 const backupFilename = /^squadslot-\d{8}T\d{6}Z(?:-[a-f0-9]{16})?\.json\.enc$/;
+const storageMonitor = createStorageMonitor(db, databasePath, backupDir);
 
 configureProxy(app);
 
@@ -1044,7 +1046,7 @@ function timeToMinutes(value) {
 }
 
 function minutesToTime(value) {
-  const clamped = Math.max(0, Math.min((23 * 60) + 59, value));
+  const clamped = Math.max(0, Math.min(24 * 60, value));
   return `${String(Math.floor(clamped / 60)).padStart(2, "0")}:${String(clamped % 60).padStart(2, "0")}`;
 }
 
@@ -1108,7 +1110,7 @@ function mergeAvailabilitySegments(items) {
 }
 
 function calendarAvailabilityForUser(userId, startDate, endDate, groupId) {
-  const availability = expandAvailability(startDate, endDate, groupId);
+  const availability = dailyAvailability(expandAvailability(startDate, endDate, groupId), startDate, endDate);
   const timezone = db.prepare("SELECT timezone FROM groups WHERE id = ?").get(groupId)?.timezone || "Europe/London";
   const committedByUser = new Map();
 
@@ -1201,7 +1203,7 @@ function calendarAvailabilityForUser(userId, startDate, endDate, groupId) {
   }
 
   return feedItems.flatMap(item => {
-    const range = utcEventRange(item.date, item.startTime, item.endTime, timezone);
+    const range = utcSegmentRange(item.date, item.startTime, item.endTime, timezone);
     return range ? [{ ...item, ...range }] : [];
   }).sort((a, b) => (
     `${a.date} ${a.startTime} ${a.kind}`.localeCompare(`${b.date} ${b.startTime} ${b.kind}`)
@@ -1588,7 +1590,8 @@ app.get("/api/availability/recurring", requireAuth, (req, res) => {
     const today = now.toISODate();
     let nextDate = rule.startDate > today ? rule.startDate : today;
     nextDate = addDateDays(nextDate, (rule.weekday - new Date(`${nextDate}T12:00:00Z`).getUTCDay() + 7) % 7);
-    if (nextDate === today && rule.endTime <= now.toFormat("HH:mm")) nextDate = addDateDays(nextDate, 7);
+    const todayRange = utcEventRange(nextDate, rule.startTime, rule.endTime, req.group.timezone);
+    if (todayRange && DateTime.fromISO(todayRange.endsAtUtc) <= now) nextDate = addDateDays(nextDate, 7);
     let attempts = 0;
     while ((skipped.has(nextDate) || !utcEventRange(nextDate, rule.startTime, rule.endTime, req.group.timezone)) && attempts++ < skipped.size + 4) nextDate = addDateDays(nextDate, 7);
     return { ...rule, nextDate: (rule.endDate && nextDate > rule.endDate) || !utcEventRange(nextDate, rule.startTime, rule.endTime, req.group.timezone) || skipped.has(nextDate) ? null : nextDate };
@@ -1611,7 +1614,7 @@ app.post("/api/availability/recurring", requireAuth, (req, res) => {
   ) {
     return res.status(400).json({ error: "At least one valid weekday is required." });
   }
-  if (!isTimeString(startTime) || !isTimeString(endTime) || startTime >= endTime) return res.status(400).json({ error: "Recurring times are invalid." });
+  if (!isTimeString(startTime) || !isTimeString(endTime) || startTime === endTime) return res.status(400).json({ error: "Recurring times are invalid." });
   if (!isDateString(startDate) || (endDate && (!isDateString(endDate) || endDate < startDate))) return res.status(400).json({ error: "Recurring date range is invalid." });
 
   const insertRule = db.prepare(`
@@ -1650,7 +1653,7 @@ app.post("/api/availability/presets", requireAuth, (req, res) => {
   const note = cleanText(req.body.note).slice(0, 200);
   if (!name) return res.status(400).json({ error: "Preset name is required." });
   if (weekday !== null && (!Number.isInteger(weekday) || weekday < 0 || weekday > 6)) return res.status(400).json({ error: "Preset weekday is invalid." });
-  if (!isTimeString(startTime) || !isTimeString(endTime) || startTime >= endTime) return res.status(400).json({ error: "Preset times are invalid." });
+  if (!isTimeString(startTime) || !isTimeString(endTime) || startTime === endTime) return res.status(400).json({ error: "Preset times are invalid." });
   const result = db.prepare(`
     INSERT INTO availability_presets (group_id, user_id, name, weekday, start_time, end_time, note)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -1671,7 +1674,7 @@ app.post("/api/availability", requireAuth, asyncRoute(async (req, res) => {
   const note = cleanText(req.body.note);
   if (!date || !startTime || !endTime) return res.status(400).json({ error: "Date, start, and end time are required." });
   if (!isDateString(date) || !isTimeString(startTime) || !isTimeString(endTime)) return res.status(400).json({ error: "Invalid date or time." });
-  if (startTime >= endTime) return res.status(400).json({ error: "End time must be after start time." });
+  if (startTime === endTime) return res.status(400).json({ error: "Start and end times must differ." });
   if (!utcEventRange(date, startTime, endTime, req.group.timezone)) return res.status(400).json({ error: timeValidationMessage });
 
   const result = db
@@ -1911,7 +1914,7 @@ app.patch("/api/events/:id", requireAuth, (req, res) => {
   const date = cleanText(req.body.date);
   const startTime = cleanText(req.body.startTime);
   const endTime = cleanText(req.body.endTime);
-  if (!isDateString(date) || !isTimeString(startTime) || !isTimeString(endTime) || startTime >= endTime) {
+  if (!isDateString(date) || !isTimeString(startTime) || !isTimeString(endTime) || startTime === endTime) {
     return res.status(400).json({ error: "Event date or time is invalid." });
   }
   const range = utcEventRange(date, startTime, endTime, req.group.timezone);
@@ -2125,7 +2128,7 @@ app.post("/api/events", requireAuth, asyncRoute(async (req, res) => {
     : [];
 
   if (!title || !date || !startTime || !endTime) return res.status(400).json({ error: "Title, date, start, and end time are required." });
-  if (!isDateString(date) || !isTimeString(startTime) || !isTimeString(endTime) || startTime >= endTime) {
+  if (!isDateString(date) || !isTimeString(startTime) || !isTimeString(endTime) || startTime === endTime) {
     return res.status(400).json({ error: "Event date or time is invalid." });
   }
   if (!Number.isInteger(minPlayers) || !Number.isInteger(maxPlayers) || minPlayers < 1 || maxPlayers < minPlayers || maxPlayers > 100) {
@@ -2413,8 +2416,8 @@ app.get("/api/dashboard", requireAuth, (req, res) => {
     ORDER BY s.created_at DESC
     LIMIT 8
   `).all(req.groupId);
-  const todayAvailability = expandAvailability(today, today, req.groupId);
-  const tonightEvents = events.filter((event) => event.date === today);
+  const todayAvailability = dailyAvailability(expandAvailability(today, today, req.groupId), today, today);
+  const tonightEvents = events.filter((event) => event.date <= today && event.endDate >= today);
 
   res.json({
     dashboard: {
@@ -2712,6 +2715,9 @@ app.get("/api/admin/audit", requireAdmin, (req, res) => {
 });
 
 addPushRoutes(app, requireAuth);
+app.get("/api/admin/storage", requireAdmin, asyncRoute(async (_req, res) => {
+  res.json(await storageMonitor.status());
+}));
 
 app.use("/api", (error, _req, res, next) => {
   if (res.headersSent) return next(error);
@@ -2730,6 +2736,14 @@ if (process.env.NODE_ENV === "production") {
 app.listen(port, () => {
   console.log(`SquadSlot listening on port ${port}`);
 });
+
+storageMonitor.maintain();
+storageMonitor.status().catch(() => console.error("Storage check failed."));
+const storageTimer = setInterval(() => {
+  storageMonitor.maintain();
+  storageMonitor.status().catch(() => console.error("Storage check failed."));
+}, 5 * 60 * 1000);
+storageTimer.unref();
 
 const reminderTimer = setInterval(() => {
   runReminderSweep(notifyDiscord).catch((error) => console.error("Reminder sweep failed:", error.message));

@@ -3,6 +3,7 @@ import { Bell, KeyRound, Send, Settings, Zap } from "lucide-react";
 import { api } from "../../lib/api.js";
 import RegistrationSettings from "./RegistrationSettings.jsx";
 import BackupSettings from "./BackupSettings.jsx";
+import StorageStatus from "./StorageStatus.jsx";
 
 const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -146,6 +147,7 @@ export default function AdminView({ user }) {
         </div>
       </header>
       <div className="admin-grid">
+        <StorageStatus />
         {settings.registrationMode && <RegistrationSettings initialMode={settings.registrationMode} users={users} onChanged={load} />}
         <section className="table-panel">
           <h2>Accounts</h2>

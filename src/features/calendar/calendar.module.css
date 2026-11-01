@@ -26,6 +26,8 @@
 .bestOptions strong { font-size: 0.7rem; color: var(--availability-ink); font-weight: 550; }
 .bestOptions button:hover { background: var(--surface); }
 .scroll { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: var(--line) transparent; padding-bottom: 8px; }
+.extended { max-height: min(75dvh, 780px); overflow: auto; }
+.extended .weekHead { position: sticky; top: 0; z-index: 6; background: var(--page-bg); }
 .weekHead { display: grid; grid-template-columns: 48px repeat(var(--day-count), minmax(116px, 1fr)); min-width: calc(48px + var(--day-count) * 116px); }
 .weekHead > div { display: flex; justify-content: center; align-items: baseline; gap: 7px; padding: 12px 5px 18px; border-left: 1px solid var(--line-soft); font-size: 0.78rem; color: var(--muted-ink); }
 .weekHead strong { font-size: 1.05rem; font-weight: 600; color: var(--ink); }

@@ -229,7 +229,7 @@ try {
     await page.locator("[data-availability-block]").first().click();
     for (const name of ["Alex Morgan", "Jamie", "Sam", "Riley"]) assert((await details.innerText()).includes(name));
     await page.getByRole("button", {name:"Close free time", exact:true}).click();
-    const eventBlock = page.locator(`[data-event-id="${session.id}"]`);
+    const eventBlock = page.locator(`[data-event-id="${session.id}"]`).first();
     await eventBlock.click();
     assert.match(await details.innerText(), /3\/4 accepted: Alex Morgan, Jamie, Sam/);
     const intersections = await page.locator("[data-event-block]").evaluateAll(events => events.flatMap(event => {
@@ -261,8 +261,12 @@ try {
     assert.equal(await availabilityForm.locator('.weekday-picker button[aria-pressed="true"]').count(), 3);
     assert.equal(await availabilityForm.locator('input[type="time"]').first().inputValue(), "17:00");
     assert.equal(await availabilityForm.locator('input[type="time"]').last().inputValue(), "19:00");
-    await eventBlock.dragTo(page.locator(`[data-calendar-slot][data-date="${dateAt(1)}"][data-hour="23:00"]`));
-    await page.getByRole("alert").filter({hasText:"Choose an earlier start"}).waitFor();
+    const [overnightMove] = await Promise.all([
+      page.waitForResponse(response => response.url().endsWith(`/api/events/${session.id}`) && response.request().method() === "PATCH"),
+      eventBlock.dragTo(page.locator(`[data-calendar-slot][data-date="${dateAt(1)}"][data-hour="23:00"]`))
+    ]);
+    assert(overnightMove.ok(), "Drag rescheduling across midnight should succeed");
+    await page.locator(`[data-event-id="${session.id}"][aria-label*="00:00 to 01:30"]`).waitFor();
     let rescheduled;
     try {
       [rescheduled] = await Promise.all([

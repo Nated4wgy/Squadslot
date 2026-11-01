@@ -226,9 +226,39 @@ Event and availability notes have a 4,000-byte limit; proposals can invite at mo
 100 players. Existing records remain in place on upgrade. Quotas also apply to
 restores: an oversized import fails transactionally without replacing the current
 data. Remove unused records or review the limits before importing larger backups.
-These are row/input safeguards, **not a disk-size quota**: audit/delivery logs,
-SQLite WAL files and other tables still require disk monitoring and host-level
-storage limits. Backup file count retention remains separately configurable.
+These are row/input safeguards, **not a disk-size quota**. The Admin storage panel
+monitors free space; host-level storage limits remain your responsibility. Backup
+file count retention remains separately configurable.
+
+### Storage Monitoring And Log Retention
+
+**Admin > Storage** shows available space on the database and backup volumes,
+database/WAL sizes, and the last cleanup result. Checks run every five minutes;
+the panel also refreshes on demand (results may be cached for one minute).
+Warnings appear in Admin and server logs, not as extra push/Discord messages.
+An unavailable filesystem check is shown as unknown, never as healthy.
+
+Optional `.env` settings, passed through the included Compose file:
+
+```env
+STORAGE_WARNING_MB=1024
+STORAGE_WARNING_PERCENT=10
+AUDIT_RETENTION_DAYS=90
+AUDIT_MAX_ROWS=20000
+DELIVERY_RETENTION_DAYS=90
+```
+
+A warning triggers below either free-space threshold. On startup and every five
+minutes, audit entries older than the configured age are removed and the newest
+configured number retained. Old delivery records are removed only when they no
+longer protect active-event notifications from being sent again. Upcoming-event
+records can therefore outlive the retention period. Accounts, schedules,
+comments and subscriptions are not removed by this cleanup.
+
+Take a backup before upgrading if you need to keep older audit history. Cleanup
+also applies after restoring older logs. SQLite can reuse deleted space without
+shrinking the database file; automatic vacuuming is deliberately not performed.
+Volume measurements are filesystem free space, not a per-container disk quota.
 
 ## First Login
 
@@ -399,9 +429,28 @@ values are preserved and interpreted in the squad timezone, as on the shared boa
 Weekly availability stays at the same local time through daylight-saving changes.
 An occurrence whose start or end falls in a missing spring-forward hour or a
 repeated autumn hour is skipped. One-off entries reject those times instead of
-silently shifting them. Choose a time outside that hour. Overnight creation still
-requires separate daily entries. Weekly Discord summary times are local to each
-squad, not the server operating system.
+silently shifting them. Choose a time outside that hour. Weekly Discord summary
+times are local to each squad, not the server operating system.
+
+### Overnight Sessions And Availability
+
+An end time earlier than the start means the **following day**. For example,
+Friday 22:00-02:00 ends Saturday at 02:00; an end of 00:00 means midnight after
+the start date. Identical start and end times are rejected, rather than interpreted
+as a 24-hour booking. This applies to sessions, proposals, one-off availability,
+weekly rules and saved presets.
+
+The board shows a segment on each affected date and includes carry-over from the
+previous week. Editing either half of free time edits the original occurrence;
+skipping a recurring date removes both halves. Dragging either event segment moves
+the whole session and preserves its wall-clock duration. Conflicts and accepted
+commitments cover the following day, and calendar feeds use the correct UTC end.
+Days expand to show early slots inside a scrollable board with pinned day headers.
+
+Clock-change endpoint checks apply on the actual end date too. A session spanning
+a clock change can have a different elapsed duration from its wall-clock duration.
+Multi-day sessions beyond the following day and choosing a repeated-hour offset
+are not supported.
 
 Accepting an invitation checks accepted/tentative commitments across all squads.
 Creating or finalising an event checks the host; rescheduling checks the host and

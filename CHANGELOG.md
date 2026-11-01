@@ -2,6 +2,22 @@
 
 Significant SquadSlot changes are recorded here by release date.
 
+## Unreleased - Storage, UI Cleanup And Overnight Scheduling
+
+### New Features
+
+- Admin storage status shows free disk space, database/WAL sizes and cleanup results, with configurable warning thresholds.
+- Automatic age/count retention for audit history and safe cleanup of old notification delivery records. Active-event deduplication is preserved.
+- Sessions, proposals, availability, weekly rules and presets can cross midnight. An earlier end time means the following day, labelled in scheduling forms.
+- Overnight entries appear on both calendar dates, including across week boundaries. Either availability segment edits the original entry; event dragging preserves the full session duration.
+
+### Improvements
+
+- Conflicts, best-time overlaps, committed free time, calendar exports and recurrence exceptions account for the next-day portion.
+- Dashboard, profile, events/invites, squads, proposals, games and friends now live in feature modules. Shared page headers and profile form controls replace duplicated layout markup.
+- Dashboard and profile styles are scoped to their features; extended calendars scroll without stretching the whole page.
+- Added storage and overnight regression tests, including DST endpoints, retention safety, permissions, ICS boundaries and responsive browser checks.
+
 ## Unreleased - Public Server Protection
 
 ### Security

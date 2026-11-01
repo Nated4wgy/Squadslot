@@ -10,6 +10,7 @@ import { EventForm } from "../events/EventForm.jsx";
 import { CalendarGrid } from "./CalendarGrid.jsx";
 import styles from "./calendar.module.css";
 import { useSchedulingTime } from "../../lib/scheduling-time.jsx";
+import { splitCalendarEntries } from "../../lib/overnight.js";
 
 export function calendarRangeLabel(days) {
   const start = days[0];
@@ -28,7 +29,7 @@ export function CalendarUtilityRail({ availability, events, onOpenEvents, onMana
   const [upcomingOpen, setUpcomingOpen] = useState(true);
   const today = scheduling.date;
   const nowTime = scheduling.time;
-  const todayItems = availability.filter((item) => item.date === today && item.endTime > nowTime);
+  const todayItems = splitCalendarEntries(availability).filter((item) => item.date === today && item.endTime > nowTime);
   const visibleItems = todayItems.some((item) => item.startTime <= nowTime)
     ? todayItems.filter((item) => item.startTime <= nowTime)
     : todayItems;
