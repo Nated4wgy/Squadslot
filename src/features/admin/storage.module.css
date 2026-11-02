@@ -1,0 +1,4 @@
+.panel { min-width: 0; overflow-wrap: anywhere; }
+.volumes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 16px; }
+.volumes > div { display: grid; gap: 8px; min-width: 0; }
+.warning { color: var(--danger, #ed8b9a); font-weight: 600; }

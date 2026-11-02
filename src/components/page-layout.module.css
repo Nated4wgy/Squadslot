@@ -1,0 +1,11 @@
+.header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; min-width: 0; }
+.header > * { min-width: 0; max-width: 100%; }
+.header h1 { font-size: 28px; margin: 0 0 6px; overflow-wrap: anywhere; }
+.header p { color: var(--muted); margin: 0; line-height: 1.5; }
+.formGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.formGrid > * { min-width: 0; }
+@media (max-width: 540px) {
+  .header { align-items: flex-start; }
+  .header h1 { font-size: 24px; }
+  .formGrid { grid-template-columns: minmax(0, 1fr); }
+}

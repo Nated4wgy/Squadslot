@@ -1,0 +1,157 @@
+.view { display: contents; }
+.view :global(.profile-fields) {
+  display: grid;
+  gap: 12px;
+}
+
+.view :global(.profile-preview) {
+  border: 1px solid rgba(245, 241, 232, 0.1);
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.22);
+}
+
+.view :global(.profile-editor) {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.view :global(.profile-preview) {
+  min-height: 310px;
+  padding: 24px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  background: #1b2021;
+  color: #f5f1e8;
+  text-align: center;
+}
+
+.view :global(.profile-preview h2),
+.view :global(.profile-preview p) {
+  margin: 8px 0 0;
+}
+
+.view :global(.calendar-subscription-panel) {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 14px;
+}
+
+.view :global(.calendar-subscription-panel .panel-heading > div) {
+  min-width: 0;
+  flex: 1;
+}
+
+.view :global(.subscription-state) {
+  margin-left: auto;
+  min-width: 54px;
+  min-height: 28px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  background: rgba(21, 25, 26, 0.08);
+  color: var(--muted-ink);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.view :global(.subscription-state.active) {
+  background: color-mix(in srgb, var(--accent) 30%, white);
+  color: #101313;
+}
+
+.view :global(.subscription-meta),
+.view :global(.subscription-actions) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.view :global(.subscription-meta) {
+  color: var(--muted-ink);
+  font-size: 0.82rem;
+}
+
+.view :global(.subscription-url) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px max-content;
+  gap: 8px;
+}
+
+.view :global(.subscription-url input) {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.view :global(.subscription-warning) {
+  margin: 0;
+  color: #7b4a28;
+  font-size: 0.8rem;
+}
+
+.view :global(.appearance-row) {
+  display: grid;
+  grid-template-columns: 1fr 1fr 54px;
+  gap: 12px;
+  align-items: end;
+}
+
+.view :global(.theme-icons) {
+  height: 42px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  background: rgba(21, 25, 26, 0.06);
+}
+
+@media (min-width: 721px) and (max-width: 900px) {
+  .view :global(.profile-editor) {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+
+  .view :global(.profile-editor) {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+
+  .view :global(.appearance-row) {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+
+  .view :global(.subscription-url) {
+    grid-template-columns: minmax(0, 1fr) 42px;
+  }
+}
+
+@media (max-width: 720px) {
+
+  .view :global(.subscription-url .secondary-button) {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 720px) {
+
+  .view :global(.subscription-actions > *) {
+    width: 100%;
+  }
+}
+
+.view :global(.profile-preview) {
+  border-color: var(--line-soft);
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: none;
+}
+.view :global(.subscription-warning) { color: var(--warning-ink); }

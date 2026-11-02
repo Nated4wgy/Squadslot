@@ -1,4 +1,4 @@
-const cacheName = "squadslot-shell-v4";
+const cacheName = "squadslot-shell-v5";
 const shellAssets = [
   "/",
   "/manifest.webmanifest",
@@ -49,6 +49,7 @@ self.addEventListener("fetch", (event) => {
     event.request.method !== "GET"
     || requestUrl.origin !== self.location.origin
     || requestUrl.pathname.startsWith("/api/")
+    || requestUrl.pathname.startsWith("/calendar/")
   ) return;
 
   event.respondWith(

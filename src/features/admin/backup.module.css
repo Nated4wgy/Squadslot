@@ -1,0 +1,10 @@
+.backup { min-width: 0; grid-template-columns: minmax(0, 1fr); overflow-wrap: anywhere; }
+.backup > *, .confirmation > * { min-width: 0; }
+.backup.backup label { color: var(--ink); }
+.backup button { white-space: normal; height: auto; min-height: 42px; }
+.backup input[type="file"] { width: 100%; min-width: 0; max-width: 100%; }
+.backup a, .filename { overflow-wrap: anywhere; min-width: 0; }
+.confirmation { border-top: 1px solid var(--line); padding-top: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.confirmation h3, .confirmation p { margin: 0; }
+.backup .option { display: flex; align-items: flex-start; gap: 10px; }
+.backup .option input { flex: 0 0 18px; width: 18px; height: 18px; margin: 2px 0 0; }

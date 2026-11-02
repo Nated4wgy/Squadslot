@@ -2,7 +2,159 @@
 
 Significant SquadSlot changes are recorded here by release date.
 
-## Unreleased - Visual Refinement
+## 1.0.0 - 2026-11-02
+
+First tagged release of SquadSlot. Includes the shared gaming calendar, recurring
+and overnight availability, friend planning, session templates, invitations,
+waitlists, voting, comments, Steam artwork, calendar subscriptions, push and
+Discord notifications, approved registration, encrypted backups, storage
+monitoring and the Glacier Midnight Board interface.
+
+See [the release overview](docs/releases/v1.0.0.md) for screenshots, installation
+and upgrade guidance. The sections below describe the work included in this
+initial release; they are not separate published versions.
+
+### Planning And Motion
+
+### New Features
+
+- Visible pages refresh squad data every 15 seconds and when returning to the app. Expanded event discussions refresh too, without clearing open drafts.
+- Save up to 20 private session templates per squad from the expanded session composer. Reuse game, times, players, capacity and notes; dates and RSVP deadlines stay specific to each session.
+- Edit sessions from Events: title, date, times, game, players, capacity, deadline and notes in one window. Existing RSVPs and votes remain unless their player is removed; the host cannot be removed.
+- Copy event links from Events. Links require sign-in and membership of the active squad; they do not grant access or bypass registration approval.
+- Friends now includes a shared-slot planner with player selection, week and minimum duration. Matching excludes existing commitments, including other squads, without revealing their details. Start a session directly from a result.
+
+### Improvements
+
+- Short page/detail entrances, a sliding navigation highlight, animated capacity/vote bars, restrained artwork hover and a brief highlight on changed events. Newly ready events use a teal highlight.
+- Reduced-motion preferences disable decorative animation and transitions.
+- Added isolated planning API tests plus Chromium/WebKit checks for edit persistence during live updates, mobile/tablet layouts, templates and planner-to-calendar handoff.
+
+## Included In 1.0.0 - Storage, UI Cleanup And Overnight Scheduling
+
+### New Features
+
+- Admin storage status shows free disk space, database/WAL sizes and cleanup results, with configurable warning thresholds.
+- Automatic age/count retention for audit history and safe cleanup of old notification delivery records. Active-event deduplication is preserved.
+- Sessions, proposals, availability, weekly rules and presets can cross midnight. An earlier end time means the following day, labelled in scheduling forms.
+- Overnight entries appear on both calendar dates, including across week boundaries. Either availability segment edits the original entry; event dragging preserves the full session duration.
+
+### Improvements
+
+- Conflicts, best-time overlaps, committed free time, calendar exports and recurrence exceptions account for the next-day portion.
+- Dashboard, profile, events/invites, squads, proposals, games and friends now live in feature modules. Shared page headers and profile form controls replace duplicated layout markup.
+- Dashboard and profile styles are scoped to their features; extended calendars scroll without stretching the whole page.
+- Added storage and overnight regression tests, including DST endpoints, retention safety, permissions, ICS boundaries and responsive browser checks.
+
+## Included In 1.0.0 - Public Server Protection
+
+### Security
+
+- Added exact-IP Cloudflare Tunnel trust while preserving direct LAN access. Untrusted callers cannot override their visitor IP with forwarded headers.
+- Bounded authentication limiter memory and added API, account-write and administrator-backup request limits with retry guidance.
+- Added installation and personal record quotas, capped pending registrations at 100, and bounded event/availability notes and proposal invite counts. Oversized restores roll back without replacing existing data.
+- Added deployment guidance for a separate cloudflared host, origin firewall restrictions and the remaining need for disk monitoring and edge traffic protection.
+- Added regression checks for forged headers, direct access, limiter exhaustion, storage limits and rollback.
+
+## Included In 1.0.0 - Timezones And Scheduling
+
+### Improvements
+
+- Scheduling screens now consistently use the active squad's labelled timezone, including event summaries, dates, Tonight and availability presets. Profile/device timezones no longer shift just one part of the shared calendar.
+- Availability in downloaded and subscribed calendars now uses UTC timestamps for correct phone-calendar conversion.
+- One-off events, RSVP deadlines and availability reject missing or ambiguous clock-change times. Weekly availability keeps the same squad-local time across DST; occurrences with invalid or repeated endpoints are skipped.
+- Discord reminders now use UTC event boundaries; weekly summaries run separately in each squad's timezone.
+- Conflict checks now span squads and cover hosts creating events, proposal finalisation and rescheduling for attending players, without disclosing their other event details.
+- Waitlists use persistent join timestamps rather than invitation order. Retries preserve position, leaving/rejoining goes to the back, and promotions recheck conflicts. Event cards show your queue position.
+
+Existing waitlists retain their previous order on upgrade because historical join
+times were never recorded. New entries use actual queue-entry order.
+
+## Included In 1.0.0 - Backup Hardening
+
+### Security And Recovery
+
+- All new backup downloads are encrypted; missing encryption configuration no longer falls back to plaintext.
+- Added per-backup random salts, strict encrypted-format checks and full-length authentication tags. Older encrypted and JSON backups remain importable.
+- Restoring now requires explicit confirmation. Calendar subscription links are revoked by default, with an option to preserve trusted links.
+- Added authenticated uploads up to 32 MB, collision-resistant backup filenames, owner-only permissions for new backup files/directories and export audit records.
+- Added regression coverage for tampering, incorrect keys, restore rollback, permissions, session invalidation, calendar revocation and mobile restore controls.
+
+Set `BACKUP_ENCRYPTION_KEY` before creating backups and keep a separate recovery
+copy of the key. Losing it makes encrypted backups unrecoverable.
+
+## Included In 1.0.0 - Personal Availability
+
+### New Features
+
+- Added a My free time mode to the shared calendar, with separately selectable entries, including daytime and event-conflicting availability.
+- Click or tap availability to inspect entries and edit your own; the editor becomes a bottom sheet on phones.
+- Edit a single recurring date without changing future weeks, or update its entire weekday rule. Delete one-off entries, skip a date or delete a series with confirmation.
+- Added a weekly, dated agenda and explicit administrator controls for managing other players. Both personal views default to your own entries.
+
+### Improvements
+
+- Calendar headings now include day and month; week ranges include the year. Agenda headings and the editor show full dates.
+- Repeating rules show their date range and next occurrence, respecting skipped dates.
+- Availability is loaded for the week being viewed, including weeks beyond the previous default fetch window.
+- Added permission, squad-isolation, exception, recurring-edit, mobile-layout and browser-interaction tests.
+
+Single-date changes become independent entries. Later changes to the weekly rule
+leave those exceptions intact. Each weekday in a multi-day schedule remains its
+own repeating rule.
+
+## Included In 1.0.0 - Midnight Board And October 2026 Audit
+
+### New Features
+
+- Rebuilt the calendar as Midnight Board with the Glacier palette: icy cyan actions, teal availability, and soft lilac sessions.
+- Added a shared header and navigation layout, full-width week grid, and a persistent details area for selected availability and events.
+- Best overlaps stand out from quieter availability; simultaneous events and free players now occupy separate lanes.
+- New registrations now require administrator approval; pending users have no session or squad access.
+- Added Admin registration controls, approval/rejection actions, and a fully closed registration mode.
+- Existing accounts remain approved on upgrade; pending requests and registration policy are included in backups.
+
+### Maintenance
+
+- Extracted authentication, Admin, calendar, availability and session creation from the main React entry file into feature modules.
+- Moved the redesigned shell, calendar and session form to scoped styles and removed their superseded global overrides.
+- Added shared form fields, actions and accessible status messages, with scoped layout styles for the new screens.
+- Added registration regression tests and browser checks for the request, approval and closed-registration flows.
+
+### Security
+
+- Updated compatible dependencies to resolve the advisories reported by npm audit; moved Docker from Node 20 to Node 22 LTS.
+- Capped availability queries at 366 days and reject impossible dates.
+- Restricted proposal voting to invited players, including disabled voting controls for other squad members.
+- Prevented untrusted forwarded headers from bypassing origin checks or changing subscription URLs.
+- Added constant-time session-signature checks and stricter session payload validation.
+- Restoring backups now invalidates existing login sessions, even when the same backup is restored repeatedly.
+- Enforced bcrypt's 72-byte limit for newly created/reset passwords and rate-limited password-change attempts.
+- Excluded private calendar feeds from offline caching and marked API responses as non-cacheable.
+- Added Discord signature timestamp checks, duplicate-account link rejection, and a temporary-password guard for Discord actions.
+
+### Fixes
+
+- Keep exact session durations when dragging events; prevent drops that would truncate a session at midnight.
+- Fixed WebKit drag-selection timing and event rescheduling when custom drag data is unavailable.
+- Recurring-availability forms now fit their available width, including tablets with the desktop sidebar visible.
+- Prevented malformed asynchronous API requests from terminating the server; invalid JSON now returns a useful client error.
+- Repeated Discord accept clicks no longer move an accepted player to the waitlist.
+- Automatic waitlist promotion skips players with scheduling conflicts.
+- Best-time suggestions now use exact availability boundaries, including partial hours and daytime availability.
+- Prevented concurrent Discord reminder sweeps from sending duplicates.
+- Fixed event expiry across timezones/midnight, dashboard invite totals beyond four invites, and stale Steam search results.
+- Clear account data on sign-out/session expiry and ignore older in-flight responses.
+- Calendar exports escape carriage returns and fold long UTF-8 lines correctly.
+- Saved public App URL now consistently overrides the environment fallback for calendar subscription links.
+- Steam request timeouts now cover response-body parsing as well as headers.
+
+### Verification
+
+- Added a dedicated security regression suite to `npm test`.
+- Added calendar logic and browser interaction checks for details, overlapping entries, multi-day selection and event rescheduling.
+
+## Included In 1.0.0 - Visual Refinement
 
 ### New Features
 
