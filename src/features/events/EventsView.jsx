@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Download, Dices, Trash2, LogOut, Bell, MessageSquare, RefreshCw, Send, Sparkles, Vote } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Download, Dices, Trash2, LogOut, Bell, MessageSquare, RefreshCw, Send, Sparkles, Vote, Link, Pencil } from "lucide-react";
+import { EventEditor } from "./EventEditor.jsx";
 import { Avatar, SteamImage, EventGameImage } from "../../components/PlayerMedia.jsx";
 import { formatDate } from "../../lib/dates.js";
 import { api } from "../../lib/api.js";
@@ -68,8 +69,13 @@ export function InvitesView({ user, events, refresh }) {
   );
 }
 
-export function EventDetails({ user, event, refresh, onDelete, onLeave }) {
-  const [expanded, setExpanded] = useState(false);
+export function EventDetails({ user, event, refresh, onDelete, onLeave, focused = false }) {
+  const [expanded, setExpanded] = useState(focused);
+  const [editing, setEditing] = useState(false);
+  const [message, setMessage] = useState("");
+  const card = useRef(null);
+  const previous = useRef(JSON.stringify(event));
+  const wasReady = useRef(event.ready);
   const [comments, setComments] = useState([]);
   const [comment, setComment] = useState("");
   const accepted = event.invites.filter((invite) => invite.status === "accepted");
@@ -79,6 +85,39 @@ export function EventDetails({ user, event, refresh, onDelete, onLeave }) {
   const canLeave = event.ownerId !== user.id && Boolean(myInvite);
   const myVote = event.gameOptions.find((option) => option.voters.includes(user.id))?.id;
 
+  useEffect(() => {
+    if (focused) card.current?.scrollIntoView({ block: "center" });
+  }, [focused]);
+  useEffect(() => {
+    const value = JSON.stringify(event);
+    if (previous.current !== value && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      card.current?.animate([
+        { boxShadow: `inset 0 0 0 2px ${!wasReady.current && event.ready ? "#63dbc3" : "#6bc9ed"}` },
+        { boxShadow: "inset 0 0 0 2px transparent" }
+      ], { duration: 1000, easing: "ease-out" });
+    }
+    previous.current = value; wasReady.current = event.ready;
+  }, [event]);
+  useEffect(() => {
+    if (!expanded) return;
+    let active = true;
+    const update = async () => {
+      if (document.visibilityState !== "visible") return;
+      try { const payload = await api(`/api/events/${event.id}/comments`); if (active) setComments(payload.comments); }
+      catch (failure) { if (active) setMessage(failure.message); }
+    };
+    update();
+    const timer = window.setInterval(update, 15000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [expanded, event.id]);
+
+  async function share() {
+    const url = new URL("/", window.location.origin);
+    url.searchParams.set("view", "events"); url.searchParams.set("event", String(event.id));
+    try { await navigator.clipboard.writeText(url.href); setMessage("Event link copied. Squad membership is required to view it."); }
+    catch { setMessage(url.href); }
+  }
+
   async function loadComments() {
     const payload = await api(`/api/events/${event.id}/comments`);
     setComments(payload.comments);
@@ -87,7 +126,6 @@ export function EventDetails({ user, event, refresh, onDelete, onLeave }) {
   async function toggleExpanded() {
     const next = !expanded;
     setExpanded(next);
-    if (next) await loadComments();
   }
 
   async function vote(optionId) {
@@ -108,7 +146,7 @@ export function EventDetails({ user, event, refresh, onDelete, onLeave }) {
   }
 
   return (
-    <article className={`event-detail-card${event.ready ? " ready-card" : ""}`}>
+    <article ref={card} id={`event-${event.id}`} className={`event-detail-card${event.ready ? " ready-card" : ""}`}>
       <div className="event-summary">
         <div className="event-title-line">
           <EventGameImage event={event} />
@@ -126,12 +164,16 @@ export function EventDetails({ user, event, refresh, onDelete, onLeave }) {
           {waitlisted.length > 0 && <small>{waitlisted.length} waitlisted</small>}
         </div>
         <div className="event-card-actions">
+          <button className="icon-button" type="button" onClick={share} aria-label={`Copy link to ${event.title}`} title="Copy event link"><Link size={17} /></button>
+          {canManage && <button className="icon-button" type="button" onClick={() => setEditing(true)} aria-label={`Edit ${event.title}`} title="Edit session"><Pencil size={17} /></button>}
           <button className="secondary-button" type="button" onClick={toggleExpanded}><MessageSquare size={16} /> {expanded ? "Close" : "Details"}</button>
           <a className="icon-action" href={`/api/events/${event.id}/ics`} title="Download calendar event"><Download size={17} /></a>
           {canLeave && <button className="danger-text-button compact-danger-action" type="button" onClick={() => onLeave(event.id)}><LogOut size={16} /> Leave event</button>}
           {canManage && <button className="danger-button" type="button" onClick={() => onDelete(event.id)} aria-label={`Delete ${event.title}`} title="Delete event"><Trash2 size={16} /></button>}
         </div>
       </div>
+      {message && <p className="event-feedback" role="status">{message}</p>}
+      {editing && <EventEditor event={event} refresh={refresh} onClose={() => setEditing(false)} />}
       {expanded && (
         <div className="event-expanded">
           <section>
@@ -141,6 +183,7 @@ export function EventDetails({ user, event, refresh, onDelete, onLeave }) {
                 <button className={`${myVote === option.id ? "selected" : ""} has-image`} type="button" onClick={() => vote(option.id)} key={option.id}>
                   <SteamImage src={option.imageUrl} appId={option.steamAppId} />
                   <span><strong>{option.title}</strong><small>{option.voteCount} vote{option.voteCount === 1 ? "" : "s"}</small></span>
+                  <span className="vote-progress" aria-hidden="true"><i style={{ width: `${Math.min(100, option.voteCount / Math.max(1, event.invites.length) * 100)}%` }} /></span>
                   {event.selectedGameOptionId === option.id && <Sparkles size={16} />}
                 </button>
               ))}
@@ -174,6 +217,7 @@ export function EventDetails({ user, event, refresh, onDelete, onLeave }) {
 }
 
 export function EventsView({ user, events, refresh, onOpenSubscription }) {
+  const targetId = Number(new URL(window.location.href).searchParams.get("event"));
   const [tab, setTab] = useState("upcoming");
   const [history, setHistory] = useState([]);
   const [message, setMessage] = useState("");
@@ -187,7 +231,7 @@ export function EventsView({ user, events, refresh, onOpenSubscription }) {
   const managedEvents = events
     .filter((event) => {
       const mine = event.invites.find((invite) => invite.userId === user.id);
-      return event.ownerId === user.id || ["accepted", "tentative", "waitlisted"].includes(mine?.status) || user.role === "admin";
+      return event.id === targetId || event.ownerId === user.id || ["accepted", "tentative", "waitlisted"].includes(mine?.status) || user.role === "admin";
     })
     .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
 
@@ -246,6 +290,7 @@ export function EventsView({ user, events, refresh, onOpenSubscription }) {
         <button className={tab === "history" ? "active" : ""} onClick={() => changeTab("history")}>History</button>
       </div>
       {message && <p className="form-error">{message}</p>}
+      {targetId > 0 && !events.some(event => event.id === targetId) && <p role="status" className="muted">This event is not in the upcoming events for your active squad. Check your squad or the event history.</p>}
       {tab === "upcoming" && <section className="table-panel events-invite-panel">
         <div className="panel-heading">
           <Bell size={18} />
@@ -261,7 +306,7 @@ export function EventsView({ user, events, refresh, onOpenSubscription }) {
       {tab === "upcoming" && managedEvents.length === 0 && <section className="table-panel"><p className="muted">No accepted or tentative events yet.</p></section>}
       {tab === "upcoming" && <div className="event-detail-list">
         {managedEvents.map((event) => (
-          <EventDetails user={user} event={event} refresh={refresh} onDelete={removeEvent} onLeave={leaveEvent} key={event.id} />
+          <EventDetails focused={event.id === targetId} user={user} event={event} refresh={refresh} onDelete={removeEvent} onLeave={leaveEvent} key={event.id} />
         ))}
       </div>}
       {tab === "history" && <div className="event-detail-list">

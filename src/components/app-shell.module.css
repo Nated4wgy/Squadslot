@@ -12,10 +12,11 @@
 .bell > span { position: absolute; top: -3px; right: -4px; min-width: 16px; height: 16px; display: grid; place-items: center; padding: 1px 3px; border-radius: 8px; background: var(--accent); color: #091722; font-size: 0.6rem; font-weight: 700; }
 .sidebar { padding: 28px 14px; border-right: 1px solid var(--line); background: var(--page-bg); min-width: 0; }
 .squad { display: block; font-size: 0.67rem; color: var(--muted-ink); padding: 0 10px 20px; }
-.sidebar nav { display: grid; gap: 5px; }
+.sidebar nav { display: grid; gap: 5px; position: relative; isolation: isolate; }
+.navMarker { position: absolute; top: 0; left: 0; z-index: -1; pointer-events: none; border-radius: 5px; background: var(--surface-raised); transition: transform 180ms ease-out, width 180ms ease-out, height 180ms ease-out; }
 .sidebar nav button { display: flex; align-items: center; gap: 10px; min-height: 40px; border: 0; border-radius: 5px; padding: 9px 10px; background: transparent; color: var(--muted-ink); font-size: 0.82rem; text-align: left; }
 .sidebar nav button:hover { background: var(--surface); color: var(--ink); }
-.sidebar nav button[aria-current="page"] { color: var(--accent-ink); background: var(--surface-raised); }
+.sidebar nav button[aria-current="page"] { color: var(--accent-ink); background: transparent; }
 .sidebar nav small { margin-left: auto; color: var(--accent-ink); }
 .sidebar .sectionStart { margin-top: 16px; }
 .workspace { min-width: 0; position: relative; padding: 30px 32px 40px; max-width: 1640px; width: 100%; margin-inline: auto; }

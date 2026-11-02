@@ -90,11 +90,12 @@ export function expandAvailability(startDate, endDate, groupId = null) {
   ));
 }
 
-export function findBestSlots(startDate, endDate, availability = null, groupId = null) {
-  const expanded = dailyAvailability(availability || expandAvailability(startDate, endDate, groupId), startDate, endDate);
-  const eventGroupClause = groupId ? " AND e.group_id = ?" : "";
+export function findBestSlots(startDate, endDate, availability = null, groupId = null, options = {}) {
+  const expanded = dailyAvailability(availability || expandAvailability(startDate, endDate, groupId), startDate, endDate)
+    .filter(item => !options.playerIds || options.playerIds.includes(item.userId));
+  const eventGroupClause = groupId && !options.playerIds ? " AND e.group_id = ?" : "";
   const zone = groupId ? db.prepare("SELECT timezone FROM groups WHERE id = ?").get(groupId)?.timezone || "Europe/London" : "Europe/London";
-  const eventParams = groupId ? [addDateDays(startDate, -2), addDateDays(endDate, 2), groupId] : [addDateDays(startDate, -2), addDateDays(endDate, 2)];
+  const eventParams = eventGroupClause ? [addDateDays(startDate, -2), addDateDays(endDate, 2), groupId] : [addDateDays(startDate, -2), addDateDays(endDate, 2)];
   const events = db
     .prepare(`
       SELECT e.date, e.start_time AS startTime, e.end_time AS endTime, ei.user_id AS userId,
@@ -152,7 +153,10 @@ export function findBestSlots(startDate, endDate, availability = null, groupId =
     }
   }
 
+  const minutes = time => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
   return slots
+    .filter(slot => (!options.playerIds || slot.count === options.playerIds.length)
+      && minutes(slot.endTime) - minutes(slot.startTime) >= (options.duration || 0))
     .sort((a, b) => b.count - a.count || `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`))
     .slice(0, 8);
 }

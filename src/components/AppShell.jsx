@@ -1,8 +1,26 @@
 import { Bell, CalendarDays, Check, Clock, Gamepad2, LayoutDashboard, LogOut, Shield, UserRound, UsersRound, Vote, Zap } from "lucide-react";
 import { Avatar } from "./PlayerMedia.jsx";
 import styles from "./app-shell.module.css";
+import { useLayoutEffect, useRef } from "react";
 
 export default function AppShell({ user, groupName, timezone, activeView, setActiveView, pendingInviteCount, onLogout, children }) {
+  const sidebar = useRef(null);
+  const marker = useRef(null);
+  useLayoutEffect(() => {
+    const nav = sidebar.current.querySelector("nav");
+    const update = () => {
+      const button = nav.querySelector('[aria-current="page"]');
+      const indicator = marker.current;
+      indicator.style.opacity = button ? "1" : "0";
+      if (!button) return;
+      indicator.style.width = `${button.offsetWidth}px`;
+      indicator.style.height = `${button.offsetHeight}px`;
+      indicator.style.transform = `translate(${button.offsetLeft}px, ${button.offsetTop}px)`;
+    };
+    update();
+    const observer = new window.ResizeObserver(update); observer.observe(nav);
+    return () => observer.disconnect();
+  }, [activeView]);
   const links = [
     ["dashboard", "Dashboard", LayoutDashboard], ["calendar", "Calendar", CalendarDays],
     ["tonight", "Tonight", Zap], ["events", "Events", Clock], ["proposals", "Proposals", Vote],
@@ -19,9 +37,9 @@ export default function AppShell({ user, groupName, timezone, activeView, setAct
         <button className={styles.signOut} onClick={onLogout} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>
       </div>
     </header>
-    <aside className={styles.sidebar}>
+    <aside ref={sidebar} className={styles.sidebar}>
       <span className={styles.squad}>{groupName || "Your squad"}</span>
-      <nav aria-label="Main navigation">{links.map(([id, label, Icon]) => <button key={id} aria-label={label} className={["groups", "profile"].includes(id) ? styles.sectionStart : ""} aria-current={activeView === id ? "page" : undefined} onClick={() => setActiveView(id)}><Icon size={17} /><span>{label}</span>{id === "events" && pendingInviteCount > 0 && <small>{pendingInviteCount}</small>}</button>)}</nav>
+      <nav aria-label="Main navigation"><span ref={marker} className={styles.navMarker} aria-hidden="true" />{links.map(([id, label, Icon]) => <button key={id} aria-label={label} className={["groups", "profile"].includes(id) ? styles.sectionStart : ""} aria-current={activeView === id ? "page" : undefined} onClick={() => setActiveView(id)}><Icon size={17} /><span>{label}</span>{id === "events" && pendingInviteCount > 0 && <small>{pendingInviteCount}</small>}</button>)}</nav>
     </aside>
     <main className={`${styles.workspace} workspace`} data-view={activeView}><p className={styles.schedulingZone}>Squad time: {timezone}</p>{children}</main>
   </div>;

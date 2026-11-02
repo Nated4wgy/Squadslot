@@ -1,8 +1,9 @@
 import { Clock, Send } from "lucide-react";
 import { Avatar } from "../../components/PlayerMedia.jsx";
 import { PageHeader } from "../../components/PageLayout.jsx";
+import { FriendPlanner } from "./FriendPlanner.jsx";
 
-export function FriendsView({ friends, availability, events }) {
+export function FriendsView({ user, friends, availability, events, onPlan }) {
   return (
     <>
       <PageHeader>
@@ -11,6 +12,7 @@ export function FriendsView({ friends, availability, events }) {
           <p>Account list, availability counts, and invite activity.</p>
         </div>
       </PageHeader>
+      <FriendPlanner user={user} friends={friends} onPlan={onPlan} />
       <section className="table-panel">
         {friends.length === 0 && <p className="muted">No friends yet. Ask someone to create an account.</p>}
         {friends.map((friend) => {

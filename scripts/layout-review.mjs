@@ -184,7 +184,11 @@ try {
         });
         if (!baseline) assert.deepEqual(overflow, [], `${theme} ${width}px ${name}: controls overflow`);
         if (!baseline) await checkDateTimeBounds(page, `${theme} ${width}px ${name}`);
-        if ((width === 1440 || width === 390) && ["Dashboard", "Calendar", "Free Time", "Profile"].includes(name)) {
+        if ((width === 1440 || width === 390) && ["Dashboard", "Calendar", "Free Time", "Profile", "Events", "Friends"].includes(name)) {
+          await page.evaluate(() => Promise.all([...document.images].map(image => image.complete ? Promise.resolve() : Promise.race([
+            new Promise(resolve => { image.addEventListener("load", resolve, {once:true}); image.addEventListener("error", resolve, {once:true}); }),
+            new Promise(resolve => window.setTimeout(resolve, 3000))
+          ]))));
           await page.screenshot({path: path.join(temp, `${theme}-${width}-${name.replaceAll(" ", "-").toLowerCase()}.png`), fullPage:true, animations:"disabled"});
         }
         if (!baseline && name === "Calendar") {

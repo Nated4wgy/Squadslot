@@ -62,7 +62,7 @@ export function CalendarUtilityRail({ availability, events, onOpenEvents, onMana
   );
 }
 
-export function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, searchGames, onManageAvailability, onOpenEvents, mode, setMode }) {
+export function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, searchGames, onManageAvailability, onOpenEvents, mode, setMode, sessionDraft, onDraftUsed }) {
   const scheduling = useSchedulingTime();
   const today = scheduling.date;
   const weekStart = useMemo(() => addDays(startOfWeek(new Date(`${today}T12:00:00`)), weekOffset * 7), [weekOffset, today]);
@@ -70,7 +70,7 @@ export function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, s
   const [bestSlots, setBestSlots] = useState([]);
   const [availabilityDraft, setAvailabilityDraft] = useState(null);
   const [availabilityOpen, setAvailabilityOpen] = useState(false);
-  const [sessionComposerOpen, setSessionComposerOpen] = useState(false);
+  const [sessionComposerOpen, setSessionComposerOpen] = useState(Boolean(sessionDraft));
   const [dayCount, setDayCount] = useState(7);
   const [transitionDirection, setTransitionDirection] = useState("next");
   const [error, setError] = useState("");
@@ -79,6 +79,9 @@ export function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, s
   const visibleDays = useMemo(() => days.slice(0, dayCount), [days, dayCount]);
   const range = useAvailabilityRange(localDate(days[0]), localDate(days[6]), data.availability);
   const personal = mode === "personal";
+  useEffect(() => {
+    if (sessionDraft) document.getElementById("pulse-session-composer")?.scrollIntoView({ block: "start" });
+  }, [sessionDraft]);
   const calendarAvailability = personal ? range.items.filter(item => item.userId === personId) : range.items;
   async function availabilityChanged() { range.reload(); await refresh(); }
 
@@ -169,7 +172,7 @@ export function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, s
       </div>
       <div className={`${styles.composers} pulse-dock-stack`}>
         {availabilityOpen && (!personal || personId === user.id) ? <AvailabilityForm selectedDate={localDate(days[0])} onCreated={() => { availabilityChanged(); setAvailabilityOpen(false); setAvailabilityDraft(null); }} compact draft={availabilityDraft} onManage={onManageAvailability} /> : null}
-        {!personal && <EventForm games={data.games} friends={data.friends} selectedDate={localDate(days[0])} onSearchGames={searchGames} onCreated={refresh} expanded={sessionComposerOpen} onToggle={setSessionComposerOpen} />}
+        {!personal && <EventForm initialValues={sessionDraft} onDraftUsed={onDraftUsed} games={data.games} friends={data.friends} selectedDate={localDate(days[0])} onSearchGames={searchGames} onCreated={refresh} expanded={sessionComposerOpen} onToggle={setSessionComposerOpen} />}
       </div>
       {!personal && <CalendarUtilityRail availability={data.availability} events={data.events} onOpenEvents={onOpenEvents} onManageAvailability={onManageAvailability} />}
     </section>

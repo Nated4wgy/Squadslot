@@ -8,6 +8,7 @@ import bcrypt from "bcryptjs";
 import { DateTime } from "luxon";
 import { clearSession, readSessionCookie, setSession } from "./auth.js";
 import { cleanupDemoOnlyDatabase, db, getSetting, publicUser, setSetting } from "./db.js";
+import { addSessionTemplateRoutes } from "./session-templates.js";
 import { isValidDiscordWebhookUrl, postDiscordUpdate } from "./discord.js";
 import { buildDiscordNotification, getNotificationSettings, saveNotificationSettings } from "./notifications.js";
 import {
@@ -1561,12 +1562,17 @@ app.get("/api/availability", requireAuth, (req, res) => {
 });
 
 addAvailabilityEditingRoutes(app, requireAuth);
+addSessionTemplateRoutes(app, requireAuth);
 
 app.get("/api/availability/best-times", requireAuth, (req, res) => {
   let start, end;
   try { ({ start, end } = dateRange(req.query, DateTime.now().setZone(req.group.timezone).toISODate(), 6)); }
   catch (error) { return res.status(400).json({ error: error.message }); }
-  res.json({ slots: findBestSlots(start, end, null, req.groupId) });
+  const playerIds = req.query.players ? [...new Set(String(req.query.players).split(",").map(Number))] : null;
+  const duration = Number(req.query.duration || 0);
+  if (!Number.isInteger(duration) || duration < 0 || duration > 1440) return res.status(400).json({ error: "Invalid duration." });
+  if (playerIds && (playerIds.length > 100 || playerIds.some(id => !Number.isSafeInteger(id) || !db.prepare("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?").get(req.groupId, id)))) return res.status(400).json({ error: "Choose members of this squad." });
+  res.json({ slots: findBestSlots(start, end, null, req.groupId, { playerIds, duration }) });
 });
 
 app.get("/api/availability/recurring", requireAuth, (req, res) => {
@@ -1919,9 +1925,30 @@ app.patch("/api/events/:id", requireAuth, (req, res) => {
   }
   const range = utcEventRange(date, startTime, endTime, req.group.timezone);
   if (!range) return res.status(400).json({ error: timeValidationMessage });
+  const previous = eventRows("e.id = ?", [eventId], req.groupId)[0];
+  const title = req.body.title === undefined ? previous.title : cleanText(req.body.title);
+  const notes = req.body.notes === undefined ? previous.notes : cleanText(req.body.notes);
+  const minPlayers = Number(req.body.minPlayers ?? previous.minPlayers);
+  const maxPlayers = Number(req.body.maxPlayers ?? previous.maxPlayers);
+  const gameTitle = req.body.gameTitle === undefined ? previous.gameTitle : cleanText(req.body.gameTitle);
+  const steamAppId = req.body.steamAppId === undefined ? previous.steamAppId : Number(req.body.steamAppId) || null;
+  const inviteIds = req.body.inviteIds === undefined ? previous.invites.map(item => item.userId) : req.body.inviteIds;
+  if (!title || title.length > 160 || (notes || "").length > 4000 || (gameTitle || "").length > 160
+    || (steamAppId !== null && (!Number.isSafeInteger(steamAppId) || steamAppId <= 0))
+    || !Number.isInteger(minPlayers) || !Number.isInteger(maxPlayers) || minPlayers < 1 || maxPlayers < minPlayers || maxPlayers > 100
+    || !Array.isArray(inviteIds) || inviteIds.length > 100 || inviteIds.some(id => !Number.isSafeInteger(id) || !db.prepare("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?").get(req.groupId, id))) {
+    return res.status(400).json({ error: "Check the title, game, players and capacity." });
+  }
+  const retainedIds = new Set([event.ownerId, ...inviteIds]);
+  const deadlineInput = req.body.rsvpDeadline;
+  const deadline = deadlineInput ? localInstant(String(deadlineInput).slice(0, 10), String(deadlineInput).slice(11, 16), req.group.timezone) : null;
+  if (deadlineInput && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(deadlineInput) || !deadline)) return res.status(400).json({ error: timeValidationMessage });
+  if (previous.invites.filter(item => item.status === "accepted" && retainedIds.has(item.userId)).length > maxPlayers) return res.status(409).json({ error: "Capacity cannot be smaller than the accepted player count." });
   const attending = db.prepare("SELECT user_id AS id FROM event_invites WHERE event_id = ? AND status IN ('accepted', 'tentative')").all(eventId);
-  const conflictingUserIds = schedulingConflicts([event.ownerId, ...attending.map(item => item.id)], range, eventId);
+  const timeChanged = range.startsAtUtc !== event.startsAtUtc || range.endsAtUtc !== event.endsAtUtc;
+  const conflictingUserIds = timeChanged ? schedulingConflicts([event.ownerId, ...attending.filter(item => retainedIds.has(item.id)).map(item => item.id)], range, eventId) : [];
   if (conflictingUserIds.length && req.body.force !== true) return res.status(409).json({ error: "This time conflicts with another commitment for the host or attending players. Choose another slot.", code: "EVENT_CONFLICT", conflictingUserIds });
+  db.transaction(() => {
   db.prepare(`
     UPDATE events
     SET date = ?, start_time = ?, end_time = ?, starts_at_utc = ?, ends_at_utc = ?,
@@ -1929,6 +1956,20 @@ app.patch("/api/events/:id", requireAuth, (req, res) => {
     WHERE id = ?
   `)
     .run(date, startTime, endTime, range.startsAtUtc, range.endsAtUtc, req.group.timezone, eventId);
+  db.prepare("UPDATE events SET title = ?, notes = ?, min_players = ?, max_players = ?, game_title = ?, steam_app_id = ? WHERE id = ?")
+    .run(title, notes, minPlayers, maxPlayers, gameTitle, steamAppId, eventId);
+  if (deadlineInput !== undefined) db.prepare("UPDATE events SET rsvp_deadline = ? WHERE id = ?").run(deadline ? deadline.toUTC().toISO() : null, eventId);
+  if (gameTitle !== previous.gameTitle || steamAppId !== previous.steamAppId) db.prepare("UPDATE events SET selected_game_option_id = NULL WHERE id = ?").run(eventId);
+  for (const invite of previous.invites) {
+    if (!retainedIds.has(invite.userId)) {
+      db.prepare("DELETE FROM event_game_votes WHERE event_id = ? AND user_id = ?").run(eventId, invite.userId);
+      db.prepare("DELETE FROM event_invites WHERE event_id = ? AND user_id = ?").run(eventId, invite.userId);
+    }
+  }
+  for (const id of retainedIds) db.prepare("INSERT OR IGNORE INTO event_invites (event_id, user_id, status) VALUES (?, ?, ?)").run(eventId, id, id === event.ownerId ? "accepted" : "invited");
+  while (promoteWaitlist(eventId)) { /* Fill newly available seats in queue order. */ }
+  if (!timeChanged) db.prepare("UPDATE events SET ready_announced = ? WHERE id = ?").run(previous.readyAnnounced, eventId);
+  })();
   audit(req.user.id, "event.rescheduled", "event", eventId, { date, startTime, endTime }, req.groupId);
   res.json({ ok: true });
 });

@@ -2,7 +2,35 @@
 
 Significant SquadSlot changes are recorded here by release date.
 
-## Unreleased - Storage, UI Cleanup And Overnight Scheduling
+## 1.0.0 - 2026-11-02
+
+First tagged release of SquadSlot. Includes the shared gaming calendar, recurring
+and overnight availability, friend planning, session templates, invitations,
+waitlists, voting, comments, Steam artwork, calendar subscriptions, push and
+Discord notifications, approved registration, encrypted backups, storage
+monitoring and the Glacier Midnight Board interface.
+
+See [the release overview](docs/releases/v1.0.0.md) for screenshots, installation
+and upgrade guidance. The sections below describe the work included in this
+initial release; they are not separate published versions.
+
+### Planning And Motion
+
+### New Features
+
+- Visible pages refresh squad data every 15 seconds and when returning to the app. Expanded event discussions refresh too, without clearing open drafts.
+- Save up to 20 private session templates per squad from the expanded session composer. Reuse game, times, players, capacity and notes; dates and RSVP deadlines stay specific to each session.
+- Edit sessions from Events: title, date, times, game, players, capacity, deadline and notes in one window. Existing RSVPs and votes remain unless their player is removed; the host cannot be removed.
+- Copy event links from Events. Links require sign-in and membership of the active squad; they do not grant access or bypass registration approval.
+- Friends now includes a shared-slot planner with player selection, week and minimum duration. Matching excludes existing commitments, including other squads, without revealing their details. Start a session directly from a result.
+
+### Improvements
+
+- Short page/detail entrances, a sliding navigation highlight, animated capacity/vote bars, restrained artwork hover and a brief highlight on changed events. Newly ready events use a teal highlight.
+- Reduced-motion preferences disable decorative animation and transitions.
+- Added isolated planning API tests plus Chromium/WebKit checks for edit persistence during live updates, mobile/tablet layouts, templates and planner-to-calendar handoff.
+
+## Included In 1.0.0 - Storage, UI Cleanup And Overnight Scheduling
 
 ### New Features
 
@@ -18,7 +46,7 @@ Significant SquadSlot changes are recorded here by release date.
 - Dashboard and profile styles are scoped to their features; extended calendars scroll without stretching the whole page.
 - Added storage and overnight regression tests, including DST endpoints, retention safety, permissions, ICS boundaries and responsive browser checks.
 
-## Unreleased - Public Server Protection
+## Included In 1.0.0 - Public Server Protection
 
 ### Security
 
@@ -28,7 +56,7 @@ Significant SquadSlot changes are recorded here by release date.
 - Added deployment guidance for a separate cloudflared host, origin firewall restrictions and the remaining need for disk monitoring and edge traffic protection.
 - Added regression checks for forged headers, direct access, limiter exhaustion, storage limits and rollback.
 
-## Unreleased - Timezones And Scheduling
+## Included In 1.0.0 - Timezones And Scheduling
 
 ### Improvements
 
@@ -42,7 +70,7 @@ Significant SquadSlot changes are recorded here by release date.
 Existing waitlists retain their previous order on upgrade because historical join
 times were never recorded. New entries use actual queue-entry order.
 
-## Unreleased - Backup Hardening
+## Included In 1.0.0 - Backup Hardening
 
 ### Security And Recovery
 
@@ -55,7 +83,7 @@ times were never recorded. New entries use actual queue-entry order.
 Set `BACKUP_ENCRYPTION_KEY` before creating backups and keep a separate recovery
 copy of the key. Losing it makes encrypted backups unrecoverable.
 
-## Unreleased - Personal Availability
+## Included In 1.0.0 - Personal Availability
 
 ### New Features
 
@@ -75,7 +103,7 @@ Single-date changes become independent entries. Later changes to the weekly rule
 leave those exceptions intact. Each weekday in a multi-day schedule remains its
 own repeating rule.
 
-## Unreleased - Midnight Board And October 2026 Audit
+## Included In 1.0.0 - Midnight Board And October 2026 Audit
 
 ### New Features
 
@@ -126,7 +154,7 @@ own repeating rule.
 - Added a dedicated security regression suite to `npm test`.
 - Added calendar logic and browser interaction checks for details, overlapping entries, multi-day selection and event rescheduling.
 
-## Unreleased - Visual Refinement
+## Included In 1.0.0 - Visual Refinement
 
 ### New Features
 

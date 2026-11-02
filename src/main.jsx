@@ -10,6 +10,7 @@ import { createRoot } from "react-dom/client";
 import { Clock } from "lucide-react";
 import "./styles.css";
 import "./theme.css";
+import "./motion.css";
 
 import { FreeTimeView } from "./features/availability/Availability.jsx";
 import { CalendarView } from "./features/calendar/CalendarView.jsx";
@@ -20,6 +21,7 @@ import AdminView from "./features/admin/AdminView.jsx";
 import AppShell from "./components/AppShell.jsx";
 import { SchedulingTimezone, schedulingClock } from "./lib/scheduling-time.jsx";
 import { disableDevicePush } from "./PushPreferences.jsx";
+import { startOfWeek } from "./lib/dates.js";
 
 function App() {
   const [user, setUser] = useState(null);
@@ -28,6 +30,7 @@ function App() {
   const [dataLoading, setDataLoading] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
   const [calendarMode, setCalendarMode] = useState("squad");
+  const [sessionDraft, setSessionDraft] = useState(null);
   const [clock, setClock] = useState(() => new Date());
   const [data, setData] = useState({ availability: [], events: [], games: [], friends: [], groups: [], dashboard: null });
   const squadTimezone = data.groups.find(group => group.id === user?.activeGroupId)?.timezone || "Europe/London";
@@ -42,6 +45,7 @@ function App() {
     setDataLoading(false);
     setUser(null);
     setCalendarMode("squad");
+    setSessionDraft(null);
   }, []);
 
   const searchGames = useCallback(async (query = "co-op") => {
@@ -56,9 +60,9 @@ function App() {
     }
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (background = false) => {
     const requestId = ++refreshRequestId.current;
-    setDataLoading(true);
+    if (!background) setDataLoading(true);
     try {
       const [availability, events, friends, groups, dashboard] = await Promise.all([
         api("/api/availability"),
@@ -108,6 +112,19 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!user || user.mustChangePassword) return;
+    const update = () => { if (document.visibilityState === "visible") refresh(true); };
+    const timer = window.setInterval(update, 15000);
+    window.addEventListener("focus", update);
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", update);
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, [user, refresh]);
+
+  useEffect(() => {
     if (!user) return;
     const preferredTheme = user.theme === "system"
       ? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")
@@ -123,9 +140,17 @@ function App() {
   }
 
   async function refreshContext() {
+    setSessionDraft(null);
     const payload = await api("/api/me");
     setUser(payload.user);
     await refresh();
+  }
+
+  function planSession(draft) {
+    const chosenWeek = startOfWeek(new Date(`${draft.date}T12:00:00`));
+    const currentWeek = startOfWeek(new Date(`${squadDate}T12:00:00`));
+    setWeekOffset(Math.round((chosenWeek - currentWeek) / (7 * 86400000)));
+    setSessionDraft(draft); setCalendarMode("squad"); setActiveView("calendar");
   }
 
   if (loading) return <main className="loading"><Clock /> Loading</main>;
@@ -161,6 +186,8 @@ function App() {
         {activeView === "calendar" && (
           <CalendarView
             key={user.activeGroupId}
+            sessionDraft={sessionDraft}
+            onDraftUsed={() => setSessionDraft(null)}
             mode={calendarMode}
             setMode={setCalendarMode}
             user={user}
@@ -186,7 +213,7 @@ function App() {
         {activeView === "invites" && <InvitesView user={user} events={visibleEvents} refresh={refresh} />}
         {activeView === "free-time" && <FreeTimeView key={user.activeGroupId} user={user} availability={data.availability} refresh={refresh} onOpenCalendar={() => { setCalendarMode("personal"); setActiveView("calendar"); }} />}
         {activeView === "groups" && <GroupsView user={user} groups={data.groups} onChanged={refreshContext} />}
-        {activeView === "friends" && <FriendsView friends={data.friends} availability={data.availability} events={visibleEvents} />}
+        {activeView === "friends" && <FriendsView user={user} friends={data.friends} availability={data.availability} events={visibleEvents} onPlan={planSession} />}
         {activeView === "games" && <GamesView games={data.games} searchGames={searchGames} />}
         {activeView === "profile" && <ProfileView user={user} onSaved={setUser} />}
         {activeView === "admin" && user.role === "admin" && <AdminView user={user} />}

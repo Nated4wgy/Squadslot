@@ -1,5 +1,9 @@
 # SquadSlot
 
+[![Release](https://img.shields.io/github/v/release/Nated4wgy/Squadslot)](https://github.com/Nated4wgy/Squadslot/releases/latest)
+
+**Your squad. One calendar. More game nights.**
+
 <p align="center">
   <img src="public/squadslot-logo-transparent.png" alt="SquadSlot" width="420">
 </p>
@@ -13,6 +17,9 @@ SquadSlot is a self-hosted gaming calendar for friend groups. Share free time, f
 - Midnight Board calendar with the Glacier palette, grouped availability, separate event lanes, Week/5-day modes, and responsive phone navigation
 - One-off or recurring availability with multi-day drag selection
 - Best-time finder that ranks the strongest player overlap
+- Friend-specific planning by week and minimum session length
+- Private session templates, in-place event editing and permission-checked event links
+- Automatic visible-page refresh and reduced-motion-aware interface animations
 - Event invitations shown in Events until accepted, declined, removed, or completed
 - Multiple squads with isolated members, calendars, events, and game suggestions
 - Pre-event proposals with time and game voting plus random tie resolution
@@ -31,6 +38,20 @@ SquadSlot is a self-hosted gaming calendar for friend groups. Share free time, f
 
 ![SquadSlot shared calendar](docs/screenshots/calendar.png)
 
+### A Closer Look
+
+![Events and invitations](docs/screenshots/events.png)
+
+<details>
+<summary>Phone view</summary>
+
+<img src="docs/screenshots/mobile-dashboard.png" alt="Dashboard on a phone" width="320">
+
+</details>
+
+Screenshots use fictional accounts and example sessions, not data installed with the app.
+See the [1.0.0 release overview](docs/releases/v1.0.0.md) for the initial feature tour and upgrade checklist.
+
 ## How It Works
 
 1. The first registered account becomes the administrator.
@@ -41,6 +62,18 @@ SquadSlot is a self-hosted gaming calendar for friend groups. Share free time, f
 6. Invitees respond, vote, comment, and optionally subscribe from their phone calendar.
 
 No demo accounts or default passwords are created.
+
+### Planning Shortcuts
+
+- **Friends > Plan with friends:** select players, a week and a minimum duration, then create a session from a shared slot. You are included automatically. Other-squad commitments block those times without exposing their event details.
+- **Calendar > New session:** expand the composer to save or apply a personal template. Each account can keep 20 templates per squad, including the game, times, players, capacity and notes. Templates are stored on the server and included in encrypted backups. Applying one keeps the chosen date and clears the RSVP deadline and voting options.
+- **Events > Edit:** the host or an administrator can update session details. Existing responses are preserved, capacity cannot drop below retained accepted players, and added players receive invitations. Removing a player also removes their game vote.
+- **Events > Copy event link:** send a direct link to friends. They must sign in and have the correct squad selected. Completed sessions remain in History.
+
+Squad data refreshes every 15 seconds while the page is visible, and on returning
+to the app. Expanded event comments refresh on the same interval. Open form drafts
+are preserved. This is polling, not an instant-delivery guarantee. Animations
+respect the device's reduced-motion preference.
 
 ### Registration And Server Access
 
