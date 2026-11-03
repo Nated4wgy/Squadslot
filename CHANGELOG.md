@@ -2,6 +2,22 @@
 
 Significant SquadSlot changes are recorded here by release date.
 
+## Unreleased - Expressive Motion
+
+- Approved expressive animations are integrated into the normal app. Full is the default for browsers without a saved preference; existing Subtle/Off choices are preserved. Device-local controls remain in Profile, and system reduced-motion preferences override decorative motion.
+- Full mode adds expandable event details, staggered calendar entrances, arriving player avatars and a finite confetti burst when a session becomes ready.
+- Game selection reveals the actual server-selected winner, with duplicate draw clicks blocked while the request is pending.
+- A development-only `/?motion-preview=1` page replays sample effects without signing in or calling the squad API. It is excluded from the production build.
+- Added Chromium/WebKit tests for replay, settings persistence, reduced motion, overflow and live readiness/winner triggers.
+
+## Unreleased - Reliability
+
+- Event editing and calendar rescheduling send a content revision; stale saves are rejected without clearing the open draft.
+- Failed squad refreshes show a retry banner. Event actions report failures instead of leaving unhandled errors, and network requests have a timeout.
+- Friends uses scoped, responsive rows to keep names, avatars and statistics separate.
+- Private session templates can be updated and preserve up to eight game-voting choices.
+- Added pull-request build/test/browser checks, Docker startup checks and release-triggered versioned GHCR publishing. These workflows require a push to GitHub before they can run; no container has been published by this local change.
+
 ## 1.0.0 - 2026-11-02
 
 First tagged release of SquadSlot. Includes the shared gaming calendar, recurring

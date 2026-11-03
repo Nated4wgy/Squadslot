@@ -887,6 +887,11 @@ function eventRows(where = "", params = [], groupId = null) {
 
   return events.map((event) => ({
     ...event,
+    editRevision: crypto.createHash("sha256").update(JSON.stringify([
+      event.title, event.notes, event.steamAppId, event.gameTitle, event.minPlayers, event.maxPlayers,
+      event.rsvpDeadline, event.startsAtUtc, event.endsAtUtc,
+      invites.filter(item => item.eventId === event.id).map(item => [item.userId, item.status]).sort((a, b) => a[0] - b[0])
+    ])).digest("hex"),
     ready: invites.filter((invite) => invite.eventId === event.id && invite.status === "accepted").length >= event.minPlayers,
     invites: invites.filter((invite) => invite.eventId === event.id),
     gameOptions: options
@@ -1926,6 +1931,9 @@ app.patch("/api/events/:id", requireAuth, (req, res) => {
   const range = utcEventRange(date, startTime, endTime, req.group.timezone);
   if (!range) return res.status(400).json({ error: timeValidationMessage });
   const previous = eventRows("e.id = ?", [eventId], req.groupId)[0];
+  if (req.body.editRevision !== undefined && req.body.editRevision !== previous.editRevision) {
+    return res.status(409).json({ code: "STALE_EVENT", error: "This event changed while you were editing. Your draft is kept. Reopen the editor to review the latest version before saving." });
+  }
   const title = req.body.title === undefined ? previous.title : cleanText(req.body.title);
   const notes = req.body.notes === undefined ? previous.notes : cleanText(req.body.notes);
   const minPlayers = Number(req.body.minPlayers ?? previous.minPlayers);

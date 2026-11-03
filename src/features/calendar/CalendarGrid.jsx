@@ -92,7 +92,7 @@ export function CalendarGrid({ user, days, availability, events, bestSlots, onAv
               const lanes = eventLanes(dayEvents);
               const freeLane = blocks.some(block => dayEvents.some(event => timeMinutes(event.startTime) < block.end && timeMinutes(event.endTime) > block.start)) ? 1 : 0;
               const columns = lanes.count + freeLane;
-              return <div className={styles.day} key={date} onMouseMove={event => {
+              return <div className={`${styles.day} motion-calendar-day`} style={{ "--day-index": dayIndex }} key={date} onMouseMove={event => {
                 const current = dragRef.current;
                 if (!current) return;
                 const rect = event.currentTarget.getBoundingClientRect();

@@ -6,6 +6,7 @@ import { api } from "../../lib/api.js";
 import PushPreferences from "../../PushPreferences.jsx";
 import { PageHeader, FormGrid } from "../../components/PageLayout.jsx";
 import { FormField } from "../../components/forms.jsx";
+import { MotionSettings } from "../motion/Motion.jsx";
 
 export function ProfileView({ user, onSaved }) {
   const [form, setForm] = useState({ ...user });
@@ -58,6 +59,7 @@ export function ProfileView({ user, onSaved }) {
   return (
     <div className={styles.view}>
       <PageHeader><div><h1>Profile</h1><p>Identity, gaming preferences, timezone, and appearance.</p></div></PageHeader>
+      <MotionSettings />
       <form className="profile-editor" onSubmit={save}>
         <section className="profile-preview">
           <Avatar user={form} size="large" />

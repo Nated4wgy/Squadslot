@@ -1,0 +1,70 @@
+name: Checks and containers
+on:
+  pull_request:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+      - run: npx playwright install --with-deps chromium webkit
+      - run: node scripts/planning-smoke.mjs --browser
+      - run: node scripts/planning-smoke.mjs --browser --webkit
+  container:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t squadslot:test .
+      - name: Smoke test container
+        run: |
+          docker run -d --name squadslot-check -p 127.0.0.1:8080:8080 \
+            -e SESSION_SECRET=isolated-ci-container-secret-123456789012345 \
+            -e APP_URL=http://localhost:8080 -e AUTO_BACKUP_ENABLED=false squadslot:test
+          trap 'docker logs squadslot-check; docker rm -fv squadslot-check' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8080/api/health; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+  publish:
+    if: github.event_name == 'release' && !github.event.release.prerelease
+    needs: container
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish versioned image
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REPOSITORY: ${{ github.repository }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          IMAGE="ghcr.io/${REPOSITORY,,}"
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
+          trap 'docker logout ghcr.io' EXIT
+          docker build --label "org.opencontainers.image.source=https://github.com/$REPOSITORY" \
+            --label "org.opencontainers.image.version=$RELEASE_TAG" \
+            -t "$IMAGE:$RELEASE_TAG" .
+          docker push "$IMAGE:$RELEASE_TAG"

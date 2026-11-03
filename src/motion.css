@@ -2,6 +2,7 @@
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
+.sync-status { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 12px; border: 1px solid var(--accent); margin-bottom: 16px; }
 .workspace > :not(dialog), .event-expanded, .pulse-session-details {
   animation: view-enter 180ms ease-out both;
 }

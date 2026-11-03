@@ -6,6 +6,7 @@ import { formatDate } from "../../lib/dates.js";
 import { api } from "../../lib/api.js";
 import { PageHeader } from "../../components/PageLayout.jsx";
 import { overnightLabel } from "../../lib/overnight.js";
+import { useMotion, ReadyCelebration, WinnerReveal } from "../motion/Motion.jsx";
 
 export function EventInviteRow({ event, onStatus, onRemove }) {
   const invite = event.myInvite;
@@ -31,6 +32,7 @@ export function EventInviteRow({ event, onStatus, onRemove }) {
 }
 
 export function InvitesView({ user, events, refresh }) {
+  const [message, setMessage] = useState("");
   const invites = events
     .filter((event) => (
       event.ownerId !== user.id
@@ -42,13 +44,19 @@ export function InvitesView({ user, events, refresh }) {
     }));
 
   async function setStatus(eventId, status) {
+    try {
     await api(`/api/events/${eventId}/invites/me`, { method: "PATCH", body: JSON.stringify({ status }) });
     refresh();
+    setMessage("");
+    } catch (failure) { setMessage(failure.message); }
   }
 
   async function removeInvite(eventId) {
+    try {
     await api(`/api/events/${eventId}/invites/me`, { method: "DELETE" });
     refresh();
+    setMessage("");
+    } catch (failure) { setMessage(failure.message); }
   }
 
   return (
@@ -60,6 +68,7 @@ export function InvitesView({ user, events, refresh }) {
         </div>
       </PageHeader>
       <section className="table-panel">
+        {message && <p className="form-error" role="alert">{message}</p>}
         {invites.length === 0 && <p className="muted">No invites yet.</p>}
         {invites.map((event) => (
           <EventInviteRow event={event} onStatus={setStatus} onRemove={removeInvite} key={event.id} />
@@ -70,6 +79,11 @@ export function InvitesView({ user, events, refresh }) {
 }
 
 export function EventDetails({ user, event, refresh, onDelete, onLeave, focused = false }) {
+  const { effective } = useMotion();
+  const [celebration, setCelebration] = useState(0);
+  const [winner, setWinner] = useState(null);
+  const [drawing, setDrawing] = useState(false);
+  const drawingLock = useRef(false);
   const [expanded, setExpanded] = useState(focused);
   const [editing, setEditing] = useState(false);
   const [message, setMessage] = useState("");
@@ -90,14 +104,15 @@ export function EventDetails({ user, event, refresh, onDelete, onLeave, focused 
   }, [focused]);
   useEffect(() => {
     const value = JSON.stringify(event);
-    if (previous.current !== value && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (!wasReady.current && event.ready) setCelebration(count => count + 1);
+    if (previous.current !== value && effective !== "off" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       card.current?.animate([
         { boxShadow: `inset 0 0 0 2px ${!wasReady.current && event.ready ? "#63dbc3" : "#6bc9ed"}` },
         { boxShadow: "inset 0 0 0 2px transparent" }
       ], { duration: 1000, easing: "ease-out" });
     }
     previous.current = value; wasReady.current = event.ready;
-  }, [event]);
+  }, [event, effective]);
   useEffect(() => {
     if (!expanded) return;
     let active = true;
@@ -129,20 +144,34 @@ export function EventDetails({ user, event, refresh, onDelete, onLeave, focused 
   }
 
   async function vote(optionId) {
+    try {
     await api(`/api/events/${event.id}/votes`, { method: "POST", body: JSON.stringify({ optionId }) });
     refresh();
+    setMessage("");
+    } catch (failure) { setMessage(`${failure.message} Your vote was not confirmed; you can try again.`); }
   }
 
   async function randomize() {
-    await api(`/api/events/${event.id}/games/randomize`, { method: "POST", body: JSON.stringify({}) });
+    if (drawingLock.current) return;
+    drawingLock.current = true;
+    setDrawing(true);
+    try {
+    const result = await api(`/api/events/${event.id}/games/randomize`, { method: "POST", body: JSON.stringify({}) });
+    setWinner({ ...result.chosen, revealKey: Date.now() });
     refresh();
+    setMessage("");
+    } catch (failure) { setMessage(`${failure.message} Refresh before trying the draw again.`); }
+    finally { drawingLock.current = false; setDrawing(false); }
   }
 
   async function addComment(eventSubmit) {
     eventSubmit.preventDefault();
+    try {
     await api(`/api/events/${event.id}/comments`, { method: "POST", body: JSON.stringify({ body: comment }) });
     setComment("");
-    loadComments();
+    await loadComments();
+    setMessage("");
+    } catch (failure) { setMessage(`${failure.message} Check the discussion before resending.`); }
   }
 
   return (
@@ -173,8 +202,9 @@ export function EventDetails({ user, event, refresh, onDelete, onLeave, focused 
         </div>
       </div>
       {message && <p className="event-feedback" role="status">{message}</p>}
+      {celebration > 0 && event.ready && <ReadyCelebration key={celebration} players={accepted} />}
       {editing && <EventEditor event={event} refresh={refresh} onClose={() => setEditing(false)} />}
-      {expanded && (
+      <div className={`event-reveal${expanded ? " is-open" : ""}`} inert={!expanded} aria-hidden={!expanded}><div>
         <div className="event-expanded">
           <section>
             <div className="panel-heading"><Vote size={17} /><div><h3>Game vote</h3><p>One vote per invited player.</p></div></div>
@@ -190,8 +220,9 @@ export function EventDetails({ user, event, refresh, onDelete, onLeave, focused 
               {event.gameOptions.length === 0 && <p className="muted">No game options were added.</p>}
             </div>
             {canManage && event.gameOptions.length > 0 && (
-              <button className="secondary-button" type="button" onClick={randomize}><Dices size={16} /> Pick winner / break tie</button>
+              <button className="secondary-button" type="button" disabled={drawing} onClick={randomize}><Dices size={16} /> {drawing ? "Choosing..." : "Pick winner / break tie"}</button>
             )}
+            <WinnerReveal key={winner?.revealKey} choice={winner} />
           </section>
           <section>
             <div className="panel-heading"><MessageSquare size={17} /><div><h3>Session comments</h3><p>Server details, mods, DLC, and voice chat.</p></div></div>
@@ -211,7 +242,7 @@ export function EventDetails({ user, event, refresh, onDelete, onLeave, focused 
           </section>
           {event.notes && <p className="event-notes"><strong>Session notes:</strong> {event.notes}</p>}
         </div>
-      )}
+      </div></div>
     </article>
   );
 }
@@ -236,13 +267,17 @@ export function EventsView({ user, events, refresh, onOpenSubscription }) {
     .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
 
   async function removeEvent(eventId) {
+    try {
     await api(`/api/events/${eventId}`, { method: "DELETE" });
     refresh();
+    } catch (failure) { setMessage(failure.message); }
   }
 
   async function leaveEvent(eventId) {
+    try {
     await api(`/api/events/${eventId}/invites/me`, { method: "DELETE" });
     refresh();
+    } catch (failure) { setMessage(failure.message); }
   }
 
   async function setInviteStatus(eventId, status) {
@@ -253,8 +288,10 @@ export function EventsView({ user, events, refresh, onOpenSubscription }) {
       refresh();
     } catch (error) {
       if (error.code === "EVENT_CONFLICT" && window.confirm(`${error.message} Accept it anyway?`)) {
+        try {
         await api(`/api/events/${eventId}/invites/me`, { method: "PATCH", body: JSON.stringify({ status, force: true }) });
         refresh();
+        } catch (failure) { setMessage(failure.message); }
       } else {
         setMessage(error.message);
       }

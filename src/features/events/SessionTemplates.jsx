@@ -13,11 +13,11 @@ export function SessionTemplates({ form, friends, onApply }) {
     api("/api/session-templates").then(result => { if (active) setTemplates(result.templates); }).catch(failure => { if (active) setError(failure.message); });
     return () => { active = false; };
   }, []);
-  async function save(remove = false) {
+  async function save(remove = false, update = false) {
     setBusy(true); setError("");
     try {
-      const result = await api(remove ? `/api/session-templates/${selected}` : "/api/session-templates", {
-        method: remove ? "DELETE" : "POST", ...(remove ? {} : { body: JSON.stringify({ ...form, name }) })
+      const result = await api(remove || update ? `/api/session-templates/${selected}` : "/api/session-templates", {
+        method: remove ? "DELETE" : update ? "PUT" : "POST", ...(remove ? {} : { body: JSON.stringify({ ...form, name }) })
       });
       setTemplates(result.templates); setSelected(""); setName("");
     } catch (failure) { setError(failure.message); }
@@ -29,12 +29,14 @@ export function SessionTemplates({ form, friends, onApply }) {
       <label>Saved template<select value={selected} onChange={event => {
         const id = event.target.value; setSelected(id);
         const template = templates.find(item => item.id === id);
+        setName(template?.name || "");
         if (template) onApply({ ...template, inviteIds: template.inviteIds.filter(id => friends.some(friend => friend.id === id)) });
       }}><option value="">Choose a template</option>{templates.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <button className="icon-button" type="button" disabled={!selected} title="Delete template" aria-label="Delete template" onClick={() => save(true)}><Trash2 size={17} /></button>
       <label>New template name<input value={name} maxLength={80} onChange={event => setName(event.target.value)} /></label>
       <button className="icon-button" type="button" disabled={!name.trim()} title="Save current session as template" aria-label="Save template" onClick={() => save()}><Save size={17} /></button>
     </div>
+    {selected && <button type="button" className="secondary-button" disabled={!name.trim()} onClick={() => save(false, true)}><Save size={16} />Update selected template</button>}
     {error && <p className="form-error" role="alert">{error}</p>}
   </fieldset>;
 }

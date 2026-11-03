@@ -22,12 +22,14 @@ import AppShell from "./components/AppShell.jsx";
 import { SchedulingTimezone, schedulingClock } from "./lib/scheduling-time.jsx";
 import { disableDevicePush } from "./PushPreferences.jsx";
 import { startOfWeek } from "./lib/dates.js";
+import { MotionProvider } from "./features/motion/Motion.jsx";
 
 function App() {
   const [user, setUser] = useState(null);
   const [activeView, setActiveView] = useState(() => new URL(window.location.href).searchParams.get("view") === "events" ? "events" : "dashboard");
   const [loading, setLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
+  const [syncError, setSyncError] = useState("");
   const [weekOffset, setWeekOffset] = useState(0);
   const [calendarMode, setCalendarMode] = useState("squad");
   const [sessionDraft, setSessionDraft] = useState(null);
@@ -43,6 +45,7 @@ function App() {
     refreshRequestId.current += 1;
     setData({ availability: [], events: [], games: [], friends: [], groups: [], dashboard: null });
     setDataLoading(false);
+    setSyncError("");
     setUser(null);
     setCalendarMode("squad");
     setSessionDraft(null);
@@ -72,6 +75,7 @@ function App() {
         api("/api/dashboard")
       ]);
       if (requestId !== refreshRequestId.current) return;
+      setSyncError("");
       setData((current) => ({
         ...current,
         availability: availability.availability,
@@ -80,8 +84,8 @@ function App() {
         groups: groups.groups,
         dashboard: dashboard.dashboard
       }));
-    } catch {
-      // Keep the signed-in shell usable if a secondary data request fails.
+    } catch (failure) {
+      if (requestId === refreshRequestId.current) setSyncError(`Updates paused: ${failure.message} Displayed data may be out of date.`);
     } finally {
       if (requestId === refreshRequestId.current) setDataLoading(false);
     }
@@ -182,6 +186,7 @@ function App() {
   return (
     <SchedulingTimezone.Provider value={squadTimezone}>
     <AppShell user={user} timezone={squadTimezone} groupName={data.groups.find(group => group.id === user.activeGroupId)?.name} activeView={activeView} setActiveView={setActiveView} pendingInviteCount={pendingInviteCount} onLogout={logout}>
+        {syncError && <div className="sync-status" role="status"><span>{syncError}</span><button className="secondary-button" disabled={dataLoading} onClick={() => refresh()}>Retry refresh</button></div>}
         {activeView === "dashboard" && <DashboardView dashboard={visibleDashboard} setActiveView={setActiveView} />}
         {activeView === "calendar" && (
           <CalendarView
@@ -223,7 +228,12 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+const root = createRoot(document.getElementById("root"));
+if (import.meta.env.DEV && new URL(window.location.href).searchParams.has("motion-preview")) {
+  import("./features/motion/MotionLab.jsx").then(({ MotionLab }) => root.render(<MotionProvider><MotionLab /></MotionProvider>));
+} else {
+  root.render(<MotionProvider><App /></MotionProvider>);
+}
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   navigator.serviceWorker.register("/service-worker.js").catch(() => {});

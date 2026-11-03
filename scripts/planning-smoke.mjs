@@ -40,6 +40,11 @@ try {
   await request("/api/session-templates", null, undefined, "GET", 401);
   const saved = await request("/api/session-templates", admin, {...form, name:"Friday crew"}, "POST", 201);
   assert.equal(saved.templates.length, 1);
+  const templateRoute = `/api/session-templates/${saved.templates[0].id}`;
+  const richer = {...form, name:"Updated crew", gameOptions:[{title:"Dota 2", steamAppId:570},{title:"Valheim",steamAppId:892970}]};
+  await request(templateRoute, friend, richer, "PUT", 404);
+  assert.equal((await request(templateRoute, admin, richer, "PUT")).templates[0].gameOptions.length, 2);
+  await request(templateRoute, admin, {...richer, gameOptions:Array(9).fill(richer.gameOptions[0])}, "PUT", 400);
   assert.equal((await request("/api/session-templates", friend)).templates.length, 0);
   await request(`/api/session-templates/${saved.templates[0].id}`, friend, undefined, "DELETE");
   assert.equal((await request("/api/session-templates", admin)).templates.length, 1);
@@ -57,6 +62,9 @@ try {
   let updated = (await request("/api/events", admin)).events.find(event => event.id === created.id);
   assert.equal(updated.invites.find(invite => invite.userId === id).status, "accepted");
   assert.equal(updated.notes, "Updated notes");
+  await request(`/api/events/${created.id}`, admin, {...form, title:"Updated session", editRevision:updated.editRevision, notes:"New revision"}, "PATCH");
+  const stale = await request(`/api/events/${created.id}`, admin, {...form, editRevision:updated.editRevision}, "PATCH", 409);
+  assert.equal(stale.code, "STALE_EVENT");
   assert((await request(planner + "&duration=120", admin)).slots.every(slot => slot.endTime <= "20:00" || slot.startTime >= "22:00"));
   if (process.argv.includes("--browser")) {
     const {chromium, webkit} = await import("playwright");
@@ -68,6 +76,7 @@ try {
     const errors = []; page.on("pageerror", error => errors.push(error.message));
     await page.goto(`${base}/?view=events&event=${created.id}`);
     await page.getByRole("button", {name:"Edit Updated session", exact:true}).click();
+    assert.equal(await page.locator("html").getAttribute("data-motion"), "full", "The normal app defaults to approved Full motion");
     await page.getByLabel("Session title", {exact:true}).fill("Unsaved draft");
     await request(`/api/events/${created.id}`, admin, {...form, title:"Remote update"}, "PATCH");
     await page.evaluate(() => window.dispatchEvent(new window.Event("focus")));
@@ -80,8 +89,35 @@ try {
       await page.screenshot({path:path.join(temp, `editor-${width}.png`), fullPage:true});
     }
     await page.getByRole("button", {name:"Save changes", exact:true}).click();
+    await page.getByText("This event changed while you were editing.", {exact:false}).waitFor();
+    assert.equal(await page.getByLabel("Session title", {exact:true}).inputValue(), "Unsaved draft");
+    assert.equal((await request("/api/events", admin)).events.find(event => event.id === created.id).title, "Remote update");
+    await page.getByRole("button", {name:"Close editor",exact:true}).click();
+    await page.getByRole("button", {name:"Edit Remote update",exact:true}).click();
+    await page.getByLabel("Session title", {exact:true}).fill("Unsaved draft");
+    await page.getByRole("button", {name:"Save changes", exact:true}).click();
     await page.locator(".session-editor").waitFor({state:"detached"});
     assert.equal((await request("/api/events", admin)).events.find(event => event.id === created.id).title, "Unsaved draft");
+    assert.equal(await page.locator(".squad-celebration").count(), 0, "Ready events must not celebrate on initial load");
+    await request(`/api/events/${created.id}`, admin, {...form, title:"Unsaved draft", minPlayers:3}, "PATCH");
+    await page.evaluate(() => window.dispatchEvent(new window.Event("focus")));
+    await page.getByText("1 more needed", {exact:true}).waitFor();
+    await request(`/api/events/${created.id}`, admin, {...form, title:"Unsaved draft", minPlayers:2}, "PATCH");
+    await page.evaluate(() => window.dispatchEvent(new window.Event("focus")));
+    await page.locator(".squad-celebration").waitFor();
+    assert.equal(await page.locator(".squad-celebration").evaluate(el => getComputedStyle(el).animationName), "squad-stamp");
+    await page.getByRole("button", {name:"Pick winner / break tie",exact:true}).click();
+    await page.locator(".winner-reveal").getByText("Dota 2", {exact:true}).waitFor();
+    const selectedEvent = (await request("/api/events", admin)).events.find(event => event.id === created.id);
+    assert.equal(selectedEvent.gameOptions.find(option => option.id === selectedEvent.selectedGameOptionId).title, "Dota 2");
+    await page.getByRole("button", {name:"Close",exact:true}).click();
+    assert.equal(await page.locator(".event-reveal").getAttribute("aria-hidden"), "true");
+    await page.route("**/api/dashboard", route => route.abort());
+    await page.evaluate(() => window.dispatchEvent(new window.Event("focus")));
+    await page.getByRole("button", {name:"Retry refresh",exact:true}).waitFor();
+    await page.unroute("**/api/dashboard");
+    await page.getByRole("button", {name:"Retry refresh",exact:true}).click();
+    await page.getByRole("button", {name:"Retry refresh",exact:true}).waitFor({state:"detached"});
     await page.getByRole("button", {name:"Friends", exact:true}).click();
     await page.getByLabel("friend", {exact:true}).check();
     await page.getByLabel("Week starting").fill(form.date);
@@ -101,7 +137,7 @@ try {
   await request(`/api/events/${created.id}`, admin, {...form, inviteIds:[]}, "PATCH");
   updated = (await request("/api/events", admin)).events.find(event => event.id === created.id);
   assert.equal(updated.invites.length, 1);
-  console.log("Planning checks passed: template ownership, membership validation, duration matching, edit permissions, RSVP preservation, capacity and invite removal.");
+  console.log("Planning checks passed: templates, stale edits, recovery, matching, permissions, RSVP preservation, capacity and invite removal; browser mode also checks live motion triggers.");
 } finally {
   await browser?.close();
   if (server.exitCode === null && server.signalCode === null) { const done = once(server, "exit"); server.kill(); await done; }

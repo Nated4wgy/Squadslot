@@ -1,0 +1,28 @@
+.motion-lab { width: min(100%, 1080px); margin: 0 auto; padding: 32px; color: var(--ink); }
+.motion-lab > header, .motion-demo-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+.motion-lab h1 { font-size: 32px; margin: 8px 0 20px; }
+.motion-lab h2 { font-size: 20px; margin: 0; }
+.motion-eyebrow { font-size: 12px; color: var(--accent-ink); }
+.motion-demo { padding: 24px 0; border-top: 1px solid var(--line); }
+.motion-demo-heading { margin-bottom: 20px; }
+.motion-sample-summary { display: flex; align-items: center; gap: 20px; }
+.motion-sample-summary > img, .motion-sample-summary > .image-fallback { width: 180px; aspect-ratio: 460/215; object-fit: cover; border-radius: 6px; }
+.motion-sample-summary > div { display: grid; gap: 8px; }
+.motion-sample-summary span { color: var(--muted-ink); font-size: 13px; }
+.motion-game-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.motion-game-strip > div { display: grid; gap: 10px; min-width: 0; }
+.motion-game-strip img, .motion-game-strip .image-fallback { width: 100%; aspect-ratio: 460/215; object-fit: cover; border-radius: 6px; }
+.motion-game-strip span { font-size: 13px; overflow-wrap: anywhere; }
+.motion-ready-stage { min-height: 110px; display: grid; align-items: center; }
+.motion-winner-stage { min-height: 140px; }
+.motion-week { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; min-height: 220px; overflow: hidden; }
+.motion-week > div { min-width: 0; padding: 12px 8px; border-left: 1px solid var(--line); }
+.motion-week strong { font-size: 13px; }
+.motion-free-slot { background: #75c8bc; color: #102326; padding: 12px; border-radius: 5px; min-height: 88px; font-size: 13px; }
+.motion-free-slot span { display: block; margin-top: 8px; font-size: 11px; }
+@media (max-width: 600px) {
+  .motion-lab { padding: 20px 16px; }
+  .motion-sample-summary > img { width: 120px; }
+  .motion-week { overflow-x: auto; grid-template-columns: repeat(5, minmax(100px, 1fr)); }
+  .motion-game-strip { gap: 8px; }
+}

@@ -8,7 +8,7 @@ export function addSessionTemplateRoutes(app, requireAuth) {
     catch { return []; }
   };
   app.get("/api/session-templates", requireAuth, (req, res) => res.json({ templates: read(req) }));
-  app.post("/api/session-templates", requireAuth, (req, res) => {
+  function save(req, res) {
     const source = req.body;
     const text = (value, max) => typeof value === "string" ? value.trim().slice(0, max) : "";
     const name = text(source.name, 80);
@@ -24,12 +24,24 @@ export function addSessionTemplateRoutes(app, requireAuth) {
       return res.status(400).json({ error: "Check the template name, times, players and capacity." });
     }
     const templates = read(req);
-    if (templates.length >= 20) return res.status(409).json({ error: "Delete a template before adding another (limit 20)." });
-    templates.push({ id: randomUUID(), name, title, startTime: source.startTime, endTime: source.endTime,
-      steamAppId, gameTitle: text(source.gameTitle, 160), notes: text(source.notes, 4000), minPlayers, maxPlayers, inviteIds });
+    const index = req.params.id ? templates.findIndex(item => item.id === req.params.id) : -1;
+    if (req.params.id && index < 0) return res.status(404).json({ error: "Template not found." });
+    if (index < 0 && templates.length >= 20) return res.status(409).json({ error: "Delete a template before adding another (limit 20)." });
+    const gameOptions = source.gameOptions ?? [];
+    if (!Array.isArray(gameOptions) || gameOptions.length > 8 || gameOptions.some(option => !option || !text(option.title, 160)
+      || (option.steamAppId !== null && (!Number.isSafeInteger(option.steamAppId) || option.steamAppId <= 0)))) {
+      return res.status(400).json({ error: "Choose up to eight valid voting options." });
+    }
+    const template = { id: req.params.id || randomUUID(), name, title, startTime: source.startTime, endTime: source.endTime,
+      steamAppId, gameTitle: text(source.gameTitle, 160), notes: text(source.notes, 4000), minPlayers, maxPlayers, inviteIds,
+      gameOptions: gameOptions.map(option => ({ title: text(option.title, 160), steamAppId: option.steamAppId, imageUrl: "" })) };
+    if (index >= 0) templates[index] = template;
+    else templates.push(template);
     setSetting(key(req), JSON.stringify(templates));
-    res.status(201).json({ templates });
-  });
+    res.status(index >= 0 ? 200 : 201).json({ templates });
+  }
+  app.post("/api/session-templates", requireAuth, save);
+  app.put("/api/session-templates/:id", requireAuth, save);
   app.delete("/api/session-templates/:id", requireAuth, (req, res) => {
     const templates = read(req).filter(item => item.id !== req.params.id);
     setSetting(key(req), JSON.stringify(templates));

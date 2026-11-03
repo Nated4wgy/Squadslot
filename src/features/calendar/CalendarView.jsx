@@ -103,7 +103,7 @@ export function CalendarView({ user, data, weekOffset, setWeekOffset, refresh, s
   async function rescheduleEvent(eventId, date, startTime, endTime) {
     setError("");
     try {
-      await api(`/api/events/${eventId}`, { method: "PATCH", body: JSON.stringify({ date, startTime, endTime }) });
+      await api(`/api/events/${eventId}`, { method: "PATCH", body: JSON.stringify({ date, startTime, endTime, editRevision: data.events.find(event => event.id === eventId)?.editRevision }) });
       await refresh();
     } catch (failure) {
       setError(failure.message);

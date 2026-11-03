@@ -63,10 +63,24 @@ See the [1.0.0 release overview](docs/releases/v1.0.0.md) for the initial featur
 
 No demo accounts or default passwords are created.
 
+### Local Animation Preview
+
+With the development server running, open `/?motion-preview=1` and choose **Full**
+to try event expansion, the squad-ready celebration, game reveal and calendar
+entrance. The replay controls use fictional data and never call the squad API.
+The preview page is development-only and is not shipped in the Docker build.
+
+For the real app, use **Profile > Motion on this device** to choose Full, Subtle
+or Off. Full is the default for browsers without a saved choice; existing Subtle
+and Off preferences are preserved. The choice stays in that browser. A device's
+reduced-motion setting takes precedence. Run `npm run test:motion` to check the
+preview in Chromium and WebKit (requires Playwright browsers and Steam artwork
+network access).
+
 ### Planning Shortcuts
 
 - **Friends > Plan with friends:** select players, a week and a minimum duration, then create a session from a shared slot. You are included automatically. Other-squad commitments block those times without exposing their event details.
-- **Calendar > New session:** expand the composer to save or apply a personal template. Each account can keep 20 templates per squad, including the game, times, players, capacity and notes. Templates are stored on the server and included in encrypted backups. Applying one keeps the chosen date and clears the RSVP deadline and voting options.
+- **Calendar > New session:** expand the composer to save, apply or update a personal template. Each account can keep 20 templates per squad, including the game, times, players, capacity, notes and up to eight voting choices. Templates are stored on the server and included in encrypted backups. Applying one keeps the chosen date and clears the RSVP deadline.
 - **Events > Edit:** the host or an administrator can update session details. Existing responses are preserved, capacity cannot drop below retained accepted players, and added players receive invitations. Removing a player also removes their game vote.
 - **Events > Copy event link:** send a direct link to friends. They must sign in and have the correct squad selected. Completed sessions remain in History.
 
@@ -74,6 +88,23 @@ Squad data refreshes every 15 seconds while the page is visible, and on returnin
 to the app. Expanded event comments refresh on the same interval. Open form drafts
 are preserved. This is polling, not an instant-delivery guarantee. Animations
 respect the device's reduced-motion preference.
+
+Failed refreshes show a retry banner while keeping the last displayed data. Event
+editors keep your draft if another person changes the event, but reject the stale
+save; reopen the editor to review the latest version before applying your changes.
+
+### Automated Checks And Container Releases
+
+The GitHub workflow runs lint, build, regression and browser checks, then builds
+and smoke-tests Docker on pull requests and changes to `main`. Publishing a
+future non-prerelease `vX.Y.Z` release runs the same checks before publishing
+`ghcr.io/nated4wgy/squadslot:vX.Y.Z` (Linux AMD64). It does not deploy to your server.
+The existing v1.0.0 release is not retroactively built. Image availability must be
+verified after the first successful workflow run; GitHub package visibility may
+need to be made public before anonymous pulls work.
+
+The workflow uses the repository's `GITHUB_TOKEN`, with package-write permission
+only in the release publishing job. See [GitHub's container publishing guidance](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images).
 
 ### Registration And Server Access
 

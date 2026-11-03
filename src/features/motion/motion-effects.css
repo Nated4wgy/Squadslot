@@ -1,0 +1,39 @@
+.motion-settings { border: 0; padding: 12px 0 20px; margin: 0; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; min-width: 0; }
+.motion-settings legend { color: var(--muted-ink); font-size: 13px; padding: 0 0 8px; }
+.motion-settings .segmented-control { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: min(100%, 330px); }
+.event-reveal { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 180ms ease; }
+.event-reveal.is-open { grid-template-rows: 1fr; }
+.event-reveal > div { min-height: 0; overflow: hidden; }
+.squad-celebration { position: relative; isolation: isolate; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px; margin: 12px 0; border-block: 1px solid var(--free, #75c8bc); color: var(--ink); overflow: hidden; }
+.squad-celebration > svg { color: #75c8bc; flex-shrink: 0; }
+.ready-players { display: flex; gap: 6px; }
+.ready-players > span { display: flex; }
+.squad-confetti { display: none; position: absolute; inset: 0; pointer-events: none; z-index: -1; }
+.squad-confetti i { position: absolute; left: 50%; top: 90%; width: 5px; height: 12px; background: #75c8bc; opacity: 0; }
+.squad-confetti i:nth-child(3n) { background: #c5b4f6; }
+.squad-confetti i:nth-child(3n + 1) { background: #6bc9ed; }
+.winner-reveal { display: flex; gap: 16px; align-items: center; overflow: hidden; padding: 16px 0; margin-block: 12px; border-block: 1px solid var(--accent); min-width: 0; }
+.winner-reveal > img, .winner-reveal > .image-fallback { width: 160px; aspect-ratio: 460 / 215; object-fit: cover; border-radius: 5px; flex-shrink: 0; }
+.winner-reveal > div { min-width: 0; display: grid; gap: 8px; }
+.winner-reveal span { display: flex; gap: 6px; align-items: center; color: var(--accent-ink); font-size: 12px; }
+.winner-reveal strong { font-size: 20px; overflow-wrap: anywhere; }
+@keyframes squad-arrival { 0% { opacity: 0; transform: translateX(-38px) scale(.6); } 65% { opacity: 1; transform: translateX(4px) scale(1.13); } 100% { opacity: 1; transform: none; } }
+@keyframes squad-confetti { 0% { opacity: 0; transform: translate(0, 0) rotate(0); } 15% { opacity: 1; } 80% { opacity: .8; } 100% { opacity: 0; transform: translate(var(--flight-x), var(--flight-y)) rotate(var(--turn)); } }
+@keyframes squad-stamp { 0% { opacity: 0; transform: scale(.82); } 65% { opacity: 1; transform: scale(1.025); } 100% { transform: none; } }
+@keyframes game-reveal { 0% { opacity: 0; transform: translateX(-48px) scale(1.12); clip-path: inset(0 100% 0 0); } 65% { opacity: 1; clip-path: inset(0); } 100% { transform: none; clip-path: inset(0); } }
+@keyframes calendar-sweep { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-motion="full"] .event-reveal { transition-duration: 650ms; transition-timing-function: cubic-bezier(.2,.8,.2,1); }
+  :root[data-motion="full"] .event-reveal.is-open .event-expanded > section { animation: calendar-sweep 550ms 80ms both; }
+  :root[data-motion="full"] .squad-celebration { animation: squad-stamp 650ms both; }
+  :root[data-motion="full"] .squad-confetti { display: block; }
+  :root[data-motion="full"] .squad-confetti i { animation: squad-confetti 1100ms calc(var(--piece) * 18ms) both ease-out; }
+  :root[data-motion="full"] .ready-players > span { animation: squad-arrival 700ms calc(var(--arrival) * 100ms) both; }
+  :root[data-motion="full"] .winner-reveal > img { animation: game-reveal 900ms both cubic-bezier(.2,.8,.2,1); }
+  :root[data-motion="full"] .winner-reveal > div { animation: squad-arrival 650ms 200ms both; }
+  :root[data-motion="full"] .motion-calendar-day { animation: calendar-sweep 550ms calc(var(--day-index) * 45ms) both; }
+  :root[data-motion="full"] .session-editor[open] { animation: squad-stamp 450ms both; }
+}
+@media (max-width: 600px) { .winner-reveal > img, .winner-reveal > .image-fallback { width: 100px; } .winner-reveal strong { font-size: 17px; } }
+:root[data-motion="off"] *, :root[data-motion="off"] *::before, :root[data-motion="off"] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+@media (prefers-reduced-motion: reduce) { .squad-confetti { display: none !important; } }
