@@ -246,7 +246,7 @@ export function RecurringAvailability({ refresh, user, ownerFilter, refreshKey }
   }
 
   return (
-    <section className="recurring-panel">
+    <section className={`recurring-panel ${styles.recurring}`}>
       {editing && <AvailabilityDialog items={[editing]} user={user} onClose={() => setEditing(null)} onSaved={async () => { await load(); await refresh(); }} />}
       {error && <p role="alert" className="form-error">{error}</p>}
       <form className="table-panel compact-form" onSubmit={addRule}>
@@ -276,7 +276,7 @@ export function RecurringAvailability({ refresh, user, ownerFilter, refreshKey }
         <OvernightHint start={rule.startTime} end={rule.endTime} />
         <p className="muted">Occurrences with missing or repeated clock-change times are skipped.</p>
         <button className="secondary-button"><Repeat size={16} /> Add weekly rule</button>
-        <div className="rule-list">
+        <div className={`rule-list ${styles.scrollingList}`} role="region" aria-label="Weekly rules" tabIndex={0}>
           {rules.filter(item => ownerFilter === "all" || item.userId === user.id).map((item) => (
             <div key={item.id}>
               <span className={styles.ruleSummary}><strong>Every {weekdays[item.weekday]} · {item.startTime}-{item.endTime}{overnightLabel(item.startTime, item.endTime)}</strong>
@@ -302,7 +302,7 @@ export function RecurringAvailability({ refresh, user, ownerFilter, refreshKey }
         <input placeholder="Note" value={preset.note} onChange={(event) => setPreset({ ...preset, note: event.target.value })} />
         <OvernightHint start={preset.startTime} end={preset.endTime} />
         <button className="secondary-button"><Plus size={16} /> Save preset</button>
-        <div className="rule-list">
+        <div className={`rule-list ${styles.scrollingList}`} role="region" aria-label="Saved availability presets" tabIndex={0}>
           {presets.map((item) => (
             <div key={item.id}>
               <span><strong>{item.name}</strong> {item.startTime}-{item.endTime}{overnightLabel(item.startTime, item.endTime)}</span>
@@ -337,9 +337,9 @@ export function FreeTimeView({ user, availability, refresh, onOpenCalendar }) {
         <button className="secondary-button" onClick={onOpenCalendar}><CalendarDays size={17} /> Personal calendar</button>
       </header>
       {editing && <AvailabilityDialog items={[editing]} user={user} onClose={() => setEditing(null)} onSaved={changed} />}
-      <div className="free-time-layout">
-        <AvailabilityForm selectedDate={selectedDate} onCreated={changed} />
-        <section className="table-panel">
+      <div className={styles.pageLayout}>
+        <AvailabilityForm compact selectedDate={selectedDate} onCreated={changed} />
+        <section className={styles.agenda}>
           <div className="section-title compact-title">
             <div>
               <h2>{ownerFilter === "all" ? "Squad availability" : "My availability"}</h2>

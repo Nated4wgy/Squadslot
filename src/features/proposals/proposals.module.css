@@ -1,0 +1,53 @@
+.layout { display: grid; grid-template-columns: minmax(0, 480px) minmax(0, 1fr); align-items: start; gap: 32px; }
+.form { min-width: 0; padding: 0; }
+.fields { display: grid; gap: 14px; padding: 0; border: 0; margin: 0; min-width: 0; }
+.fields h2 { font-size: 20px; margin: 0 0 4px; }
+.fields h3 { font-size: 14px; margin: 12px 0 0; }
+.fields label { display: grid; gap: 6px; min-width: 0; font-size: 13px; color: var(--muted-ink); }
+.fields :is(input,textarea,select) { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; min-height: 42px; }
+.fields textarea { min-height: 72px; resize: vertical; }
+.fields > button { justify-self: start; }
+.timeOption { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr)) 36px; gap: 8px; align-items: end; min-width: 0; }
+.timeOption > p { grid-column: 1 / -1; margin: 0; }
+.timeOption > button { width: 36px; min-width: 0; padding: 0; }
+.timeOption input::-webkit-date-and-time-value { min-width: 0; }
+.inviteHeading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 8px; }
+.inviteHeading h3 { display: flex; gap: 8px; align-items: center; margin: 0; }
+.inviteHeading small { color: var(--muted-ink); }
+.players { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-height: 260px; overflow-y: auto; }
+.players button { display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); min-width: 0; transition: background 150ms, border-color 150ms; }
+.players button > span:nth-child(2) { flex: 1; overflow-wrap: anywhere; font-size: 13px; min-width: 0; }
+.players button > :first-child, .selectionMark { flex-shrink: 0; }
+.selectionMark { opacity: 0; color: var(--accent-ink); }
+.players button[aria-pressed="true"] { border-color: var(--accent); background: var(--surface-raised); }
+.players button[aria-pressed="true"] .selectionMark { opacity: 1; }
+.players button:hover { border-color: var(--accent); }
+.gamePicker { display: grid; gap: 8px; min-width: 0; }
+.search { display: grid; grid-template-columns: 18px minmax(0,1fr); align-items: center; gap: 8px; }
+.search > svg { color: var(--muted-ink); }
+.searchResults { max-height: 250px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; }
+.searchResults button, .selectedGames > div { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px; }
+.searchResults button { width: 100%; border: 0; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--ink); text-align: left; }
+.searchResults button:hover { background: var(--surface-raised); }
+.searchResults button > span:not(:global(.image-fallback)), .selectedGames > div > span:not(:global(.image-fallback)) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.searchResults :is(img,:global(.image-fallback)), .selectedGames :is(img,:global(.image-fallback)) { width: 56px; height: 28px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+.selectedGames { display: grid; gap: 6px; }
+.selectedGames > div { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; }
+.list { display: grid; align-content: start; gap: 20px; min-width: 0; }
+.card { display: grid; align-content: start; gap: 12px; padding: 20px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); min-width: 0; overflow-wrap: anywhere; }
+.card :is(h2,h3,p) { margin: 0; }
+.card :global(.section-title) { margin: 0; display: flex; align-items: start; flex-wrap: nowrap; gap: 12px; }
+.card :global(.section-title) > div { min-width: 0; }
+.card :global(.section-title) button { flex-shrink: 0; }
+.card :global(.section-title) p { margin-top: 6px; }
+.card h2 { font-size: 18px; }
+.card h3 { font-size: 14px; }
+.message { padding: 12px 0; color: var(--accent-ink); overflow-wrap: anywhere; }
+@media (max-width: 1100px) { .layout { grid-template-columns: minmax(0,1fr); gap: 32px; } }
+@media (max-width: 600px) {
+  .fields :is(input,textarea,select) { font-size: 16px; }
+  .timeOption { grid-template-columns: repeat(2, minmax(0,1fr)) 36px; }
+  .timeOption > label:first-child { grid-column: 1 / -1; }
+  .players { grid-template-columns: minmax(0,1fr); }
+  .card { padding: 16px; }
+}

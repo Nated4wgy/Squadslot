@@ -131,6 +131,50 @@ try {
     await page.emulateMedia({reducedMotion:"reduce"});
     assert(await page.locator(".pulse-session-details").evaluate(element => getComputedStyle(element).animationName === "none"));
     await page.screenshot({path:path.join(temp, "planner-composer.png"),fullPage:true});
+    await page.getByRole("button", {name:"Proposals",exact:true}).click();
+    await page.route("**/api/games?*", route => route.fulfill({json:{games:[{appId:548430,title:"Deep Rock Galactic",image:"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/548430/header.jpg"}]}}));
+    await page.getByLabel("Title",{exact:true}).fill("Search-driven proposal");
+    await page.getByLabel("Search games",{exact:true}).fill("Deep Rock");
+    await page.getByRole("button", {name:"Deep Rock Galactic",exact:true}).click();
+    assert.equal(await page.getByRole("button",{name:"Remove Deep Rock Galactic",exact:true}).count(),1);
+    const inviteTile = page.getByRole("button",{name:"FR friend",exact:true});
+    await inviteTile.click();
+    assert.equal(await inviteTile.getAttribute("aria-pressed"),"true");
+    await page.getByLabel("Search games",{exact:true}).fill("Board games");
+    await page.getByRole("button",{name:"Add custom game: Board games",exact:true}).click();
+    await page.getByRole("button",{name:"Add time",exact:true}).click();
+    await page.getByRole("button",{name:"Remove time option 2",exact:true}).click();
+    await page.getByRole("button",{name:"Create proposal",exact:true}).click();
+    await page.getByRole("heading",{name:"Search-driven proposal",exact:true}).waitFor();
+    const proposal = (await request("/api/proposals",admin)).proposals.find(item => item.title === "Search-driven proposal");
+    assert(proposal.inviteIds.includes(id));
+    assert(proposal.games.some(game => game.steamAppId === 548430));
+    assert(proposal.games.some(game => game.title === "Board games"));
+    for (const width of [1440,390,768]) {
+      await page.setViewportSize({width,height:1000});
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
+      await page.screenshot({path:path.join(temp,`proposals-${width}.png`),fullPage:true});
+    }
+    await page.setViewportSize({width:1440,height:1000});
+    await page.getByRole("button",{name:"Free Time",exact:true}).click();
+    const presetPanel = page.locator(".recurring-panel form").filter({has:page.getByRole("heading",{name:"Saved presets",exact:true})});
+    await presetPanel.waitFor();
+    const presetHeight = (await presetPanel.boundingBox()).height;
+    for (let index=0; index<3; index++) await request("/api/availability/recurring",admin,{weekdays:[0,1,2,3,4,5,6],startDate:"2035-08-01",endDate:"2035-09-01",startTime:"19:00",endTime:"23:00",note:`Scrolling rule ${index}`},"POST",201);
+    await page.getByRole("button",{name:"Dashboard",exact:true}).click();
+    await page.getByRole("button",{name:"Free Time",exact:true}).click();
+    await page.waitForFunction(() => document.querySelector('[aria-label="Weekly rules"]')?.children.length >= 21);
+    assert(Math.abs((await presetPanel.boundingBox()).height - presetHeight) < 2, "Rules must not stretch presets");
+    assert(await page.getByRole("region",{name:"Weekly rules",exact:true}).evaluate(el => el.scrollHeight > el.clientHeight && el.clientHeight <= 322));
+    assert(await page.getByRole("region",{name:"Weekly rules",exact:true}).evaluate(el => [...el.children].every(row => {
+      const content = row.querySelector("span").getBoundingClientRect(), bounds = row.getBoundingClientRect();
+      return content.top >= bounds.top && content.bottom <= bounds.bottom;
+    })), "Scrollable rows must not clip their own labels");
+    for (const width of [1440,390,768]) {
+      await page.setViewportSize({width,height:1000});
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
+      await page.screenshot({path:path.join(temp,`free-time-${width}.png`),fullPage:true});
+    }
     assert.deepEqual(errors, []);
     console.log(`Planning screenshots: ${temp}`);
   }

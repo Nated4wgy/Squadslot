@@ -2,6 +2,13 @@
 
 Significant SquadSlot changes are recorded here by release date.
 
+## Unreleased - Planning Layouts
+
+- Proposals has a compact composer, avatar-based player selection and search-as-you-type Steam results with artwork. Custom game titles remain supported; App IDs are no longer required.
+- Free Time has a full-width logging form and clearer spacing between the agenda, recurring schedule and presets.
+- Weekly rules and saved presets scroll independently, keeping long lists from stretching neighbouring sections.
+- Added browser checks for proposal creation, Steam selection, mobile/tablet layouts and long recurring-rule lists.
+
 ## Unreleased - Expressive Motion
 
 - Approved expressive animations are integrated into the normal app. Full is the default for browsers without a saved preference; existing Subtle/Off choices are preserved. Device-local controls remain in Profile, and system reduced-motion preferences override decorative motion.

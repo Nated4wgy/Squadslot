@@ -25,3 +25,15 @@
 .agendaDay h3 { font-size: .95rem; color: var(--accent-ink); margin: 18px 0 8px; }
 .agendaDay :global(.free-time-row) { min-width: 0; }
 .agendaDay :global(.free-time-row > div) { min-width: 0; overflow-wrap: anywhere; }
+.pageLayout { display: grid; grid-template-columns: minmax(0,1fr); gap: 32px; margin-bottom: 36px; }
+.pageLayout > .compact { width: 100%; max-width: none; margin: 0; }
+.agenda { min-width: 0; padding: 4px 0 24px; }
+.recurring:global(.recurring-panel) { align-items: start; gap: 32px; margin-top: 0; }
+.recurring > form { align-self: start; align-content: start; min-width: 0; padding: 20px 0; border: 0; border-top: 1px solid var(--line); background: transparent; border-radius: 0; }
+.recurring > :global(.form-error) { grid-column: 1 / -1; }
+.recurring .scrollingList { display: flex; flex-direction: column; max-height: 320px; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; padding-right: 6px; }
+.scrollingList:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.scrollingList > div { min-width: 0; flex: 0 0 auto; padding: 12px; }
+.scrollingList .ruleSummary { line-height: 1.45; }
+.scrollingList > div > span { min-width: 0; overflow-wrap: anywhere; }
+.scrollingList button { flex-shrink: 0; }
